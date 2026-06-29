@@ -177,11 +177,13 @@ def set_priority(db: Session, job_id: int, priority: int) -> Job:
 
 def estimate(db: Session, movie_id: int) -> dict:
     """Прикидка расхода Whisper. Для безлимитных провайдеров — no-op."""
+    movie = db.get(Movie, movie_id)
+    if movie is None:
+        raise LookupError("Фильм не найден.")
     stt = ss.get_provider_config(db, "stt")
     if not provider_has_limits(stt.type):
         return {"unlimited": True}
-    movie = db.get(Movie, movie_id)
-    needed = float(movie.duration) if movie and movie.duration else None
+    needed = float(movie.duration) if movie.duration else None
     from .usage_service import remaining_seconds
 
     remaining = remaining_seconds(db)
@@ -195,7 +197,15 @@ def estimate(db: Session, movie_id: int) -> dict:
 
 def resolve_batch_movie_ids(db: Session, payload: JobBatchIn) -> list[int]:
     if payload.movie_ids:
-        return list(payload.movie_ids)
+        ids = list(dict.fromkeys(payload.movie_ids))  # уникальные, порядок сохранён
+        existing = set(db.scalars(select(Movie.id).where(Movie.id.in_(ids))).all())
+        missing = [i for i in ids if i not in existing]
+        if missing:
+            raise LookupError(f"Фильмы не найдены: {missing}")
+        return ids
+    # без movie_ids нужен хотя бы фильтр — иначе пакет накроет ВСЮ библиотеку
+    if not payload.series and payload.season is None:
+        raise ValueError("Пакет требует movie_ids, либо series, либо season.")
     query = select(Movie.id)
     if payload.series:
         query = query.where(Movie.series == payload.series)

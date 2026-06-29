@@ -39,9 +39,24 @@ def get_movie(movie_id: int, db: Session = Depends(get_db)) -> Movie:
 
 @router.delete("/movies/{movie_id}")
 def delete_movie(movie_id: int, db: Session = Depends(get_db)) -> dict:
+    from ...models import JobStatus
+    from ...services.job_service import _revoke
+    from ...services.short_service import _remove_files
+
     movie = db.get(Movie, movie_id)
     if movie is None:
         raise HTTPException(status_code=404, detail="Фильм не найден.")
-    db.delete(movie)  # запись, не файл (каскадом удалятся transcripts/jobs/shorts)
+
+    # отменить активные задачи фильма (иначе воркер дорендерит в удалённый фильм)
+    for job in movie.jobs:
+        if job.status in (JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.WAITING_LIMIT):
+            job.status = JobStatus.CANCELED
+            _revoke(job, terminate=True)
+    # удалить медиафайлы шортсов (каскад в БД их строки снесёт, но не файлы на диске)
+    for short in movie.shorts:
+        _remove_files(short)
+    db.commit()
+
+    db.delete(movie)  # запись, не файл; каскадом удалятся transcripts/jobs/shorts
     db.commit()
     return {"ok": True}

@@ -53,7 +53,12 @@ def _settings_from_export(masked: dict) -> dict:
     return payload
 
 
+_KNOWN_KEYS = ("settings", "categories", "subtitle_presets", "profiles")
+
+
 def import_config(db: Session, data: dict) -> dict:
+    if not isinstance(data, dict) or not any(k in data for k in _KNOWN_KEYS):
+        raise ValueError("Не похоже на экспорт конфигурации Shorts Farm.")
     imported = {"settings": False, "categories": 0, "subtitle_presets": 0, "profiles": 0}
 
     if isinstance(data.get("settings"), dict):

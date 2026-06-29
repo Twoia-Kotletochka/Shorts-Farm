@@ -48,10 +48,8 @@ def energy_in_range(rms: np.ndarray, window_sec: float, start: float, end: float
     """Средняя нормализованная энергия в интервале [start, end] (0..1)."""
     if rms.size == 0 or end <= start:
         return 0.0
-    i0 = max(0, int(start / window_sec))
-    i1 = min(rms.size, int(end / window_sec) + 1)
-    if i1 <= i0:
-        return float(rms[min(i0, rms.size - 1)])
+    i0 = min(max(0, int(start / window_sec)), rms.size - 1)
+    i1 = min(rms.size, max(i0 + 1, int(end / window_sec) + 1))
     return float(rms[i0:i1].mean())
 
 

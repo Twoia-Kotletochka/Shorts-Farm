@@ -6,10 +6,12 @@ base_url / api_key / model. Не-совместимые провайдеры —
 """
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
 from collections.abc import Callable
+from typing import Any
 
 import httpx
 
@@ -78,6 +80,21 @@ def _with_retry(do_request: Callable[[], httpx.Response], max_attempts: int | No
     raise ProviderError("Не удалось выполнить запрос к провайдеру.")
 
 
+def _safe_json(resp: httpx.Response) -> Any:
+    """resp.json(), но устойчиво к битым байтам тела.
+
+    httpx.Response.json() сводится к json.loads(resp.content), а это СТРОГОЕ декодирование
+    байтов как utf-8 (без errors=). Если провайдер прислал оборванное/битое по байтам тело
+    (частый случай на кириллице — лид-байт 0xD0 без своего continuation-байта), падает
+    UnicodeDecodeError. Декодируем терпимо (errors="replace") и парсим уже из строки —
+    валидные тела при этом не меняются, а битые дают replacement-символ вместо краха.
+    """
+    try:
+        return resp.json()
+    except UnicodeDecodeError:
+        return json.loads(resp.content.decode("utf-8", errors="replace"))
+
+
 class OpenAICompatLLM:
     """Чат-комплишены через {base_url}/chat/completions."""
 
@@ -116,7 +133,7 @@ class OpenAICompatLLM:
                 timeout=DEFAULT_TIMEOUT,
             ), max_attempts=max_attempts)
             resp.raise_for_status()
-            data = resp.json()
+            data = _safe_json(resp)
             # некоторые OpenAI-совместимые сервера (напр. Ollama Cloud) отдают 200 + {"error": ...}
             if isinstance(data, dict) and data.get("error"):
                 err = data["error"]
@@ -171,7 +188,7 @@ class OpenAICompatSTT:
                 timeout=DEFAULT_TIMEOUT,
             ))
             resp.raise_for_status()
-            return _parse_transcription(resp.json(), provider="openai_compat", model=self.model)
+            return _parse_transcription(_safe_json(resp), provider="openai_compat", model=self.model)
         except httpx.HTTPStatusError as exc:
             raise ProviderError(_http_error_text(exc)) from exc
         except (httpx.HTTPError, KeyError, ValueError, OSError) as exc:
@@ -227,7 +244,7 @@ def _list_models(base_url: str, api_key: str | None) -> list[str]:
             timeout=httpx.Timeout(15.0),
         ))
         resp.raise_for_status()
-        data = resp.json()
+        data = _safe_json(resp)
         return [m.get("id", "") for m in data.get("data", []) if m.get("id")]
     except httpx.HTTPStatusError as exc:
         raise ProviderError(_http_error_text(exc)) from exc
@@ -238,7 +255,7 @@ def _list_models(base_url: str, api_key: str | None) -> list[str]:
 def _http_error_text(exc: httpx.HTTPStatusError) -> str:
     code = exc.response.status_code
     try:
-        body = exc.response.json()
+        body = _safe_json(exc.response)
         err = body.get("error") if isinstance(body, dict) else None
         if isinstance(err, dict):
             detail = err.get("message") or str(err)

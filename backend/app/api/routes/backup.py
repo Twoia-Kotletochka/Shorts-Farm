@@ -1,7 +1,7 @@
 """Бэкап БД/настроек и экспорт/импорт конфига."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ...db import get_db
@@ -25,5 +25,8 @@ def config_export(db: Session = Depends(get_db)) -> dict:
 
 @router.post("/config/import", response_model=ConfigImportResult)
 def config_import(data: dict, db: Session = Depends(get_db)) -> ConfigImportResult:
-    imported = import_config(db, data)
+    try:
+        imported = import_config(db, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ConfigImportResult(ok=True, imported=imported)

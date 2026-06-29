@@ -41,12 +41,20 @@ def list_jobs(db: Session = Depends(get_db)):
 # Статические пути — до параметризованного /{job_id}.
 @router.post("/estimate", response_model=JobEstimate)
 def estimate(payload: JobCreate, db: Session = Depends(get_db)) -> JobEstimate:
-    return JobEstimate(**job_service.estimate(db, payload.movie_id))
+    try:
+        return JobEstimate(**job_service.estimate(db, payload.movie_id))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/batch", response_model=JobBatchOut)
 def batch(payload: JobBatchIn, db: Session = Depends(get_db)) -> JobBatchOut:
-    job_ids = job_service.create_batch(db, payload)
+    try:
+        job_ids = job_service.create_batch(db, payload)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JobBatchOut(job_ids=job_ids)
 
 

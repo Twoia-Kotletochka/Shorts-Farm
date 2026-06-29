@@ -19,7 +19,7 @@ from ..models import (
 from sqlalchemy.orm import Session
 
 from ..providers import (
-    ProviderError, Transcript, TranscriptSegment, Word,
+    ProviderError, ProviderQuotaError, Transcript, TranscriptSegment, Word,
 )
 from ..services import settings_service as ss
 from ..services import usage_service
@@ -168,9 +168,10 @@ def run_generation(job_id: int) -> None:
         # давало склейку в несколько минут (не «шортс»).
         comp_budget: float | None = None
         if fmt == "compilation":
-            seg = tuple(params.get("compilation_segment_sec", [6, 12]))[:2] or (6, 12)
+            raw_seg = params.get("compilation_segment_sec") or [6, 12]
+            seg = tuple(raw_seg)[:2] or (6, 12)
             target = (int(seg[0]), int(seg[1]))
-            comp_budget = float(params.get("compilation_total_sec", 60))
+            comp_budget = float(params.get("compilation_total_sec") or 60)
 
         if not ensure_disk():
             raise RuntimeError("Недостаточно места на диске для генерации.")
@@ -189,10 +190,11 @@ def run_generation(job_id: int) -> None:
 
         audio_index = _resolve_audio_index(movie, params.get("audio_track"), language)
         log.info("Задача #%d: аудиодорожка = %s", job.id, audio_index)
+        # учёт STT-квоты происходит внутри transcribe_movie (только при реальной
+        # транскрипции, не на кэш-хите, и только для провайдеров с квотами)
         transcript = transcribe_movie(
             db, movie, stt_cfg, language=None, audio_index=audio_index, progress_cb=tcb
         )
-        usage_service.record_seconds(db, movie.duration or 0.0)
         if _is_canceled(db, job_id):
             return
 
@@ -244,7 +246,8 @@ def run_generation(job_id: int) -> None:
             for i, cand in enumerate(chosen):
                 if _is_canceled(db, job_id):
                     return
-                ensure_disk()
+                if not ensure_disk():
+                    raise RuntimeError("Недостаточно места на диске для рендера.")
                 _make_draft_short(db, job, movie, cand, transcript, opts, source, audio_index)
                 job.progress = round(0.8 + 0.18 * (i + 1) / len(chosen), 3)
                 db.commit()
@@ -255,6 +258,9 @@ def run_generation(job_id: int) -> None:
         job.finished_at = utcnow()
         db.commit()
         log.info("Задача #%d завершена: %d черновиков.", job_id, len(chosen))
+    except ProviderQuotaError as exc:
+        # квота/лимит провайдера исчерпаны — не «провал», а ожидание сброса (видно в очереди, можно повторить)
+        _waiting_limit(db, job_id, f"Лимит/квота провайдера исчерпаны: {exc}. Повторите после сброса.")
     except ProviderError as exc:
         _fail(db, job_id, f"Провайдер: {exc}")
     except Exception as exc:  # noqa: BLE001
@@ -262,6 +268,18 @@ def run_generation(job_id: int) -> None:
         _fail(db, job_id, str(exc))
     finally:
         db.close()
+
+
+def _waiting_limit(db, job_id: int, error: str) -> None:
+    try:
+        db.rollback()
+    except Exception:  # noqa: BLE001
+        pass
+    job = db.get(Job, job_id)
+    if job and job.status != JobStatus.CANCELED:
+        job.status = JobStatus.WAITING_LIMIT
+        job.error = error[:1000]
+        db.commit()
 
 
 def _fail(db, job_id: int, error: str) -> None:
@@ -424,8 +442,18 @@ def run_final_render(short_id: int) -> None:
             short.metadata_json = md
             db.commit()
         log.info("Финальный рендер шортса #%d готов: %s", short_id, out.name)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         log.exception("Финальный рендер шортса #%d упал", short_id)
+        try:  # сделать ошибку видимой на фронте, а не молча
+            db.rollback()
+            s = db.get(Short, short_id)
+            if s is not None:
+                md = dict(s.metadata_json or {})
+                md["render_error"] = str(exc)[:500]
+                s.metadata_json = md
+                db.commit()
+        except Exception:  # noqa: BLE001
+            pass
     finally:
         db.close()
 

@@ -10,7 +10,10 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from ..models import Movie, Transcript as TranscriptRow, TranscriptionStatus
-from ..providers import ProviderConfig, Transcript, TranscriptSegment, Word, build_stt
+from ..providers import (
+    ProviderConfig, Transcript, TranscriptSegment, Word, build_stt, provider_has_limits,
+)
+from ..services import usage_service
 from ..storage import sources_dir, transcripts_cache_dir
 from .audio import audio_key, chunk_audio, cleanup_chunks, extract_audio
 
@@ -124,6 +127,8 @@ def transcribe_movie(
         raise FileNotFoundError(f"Файл исходника не найден: {movie_path}")
 
     provider = build_stt(stt_config)
+    audio: Path | None = None
+    chunks: list = []
     try:
         progress(0.05, "извлечение аудио")
         audio = extract_audio(movie_path, file_hash, audio_index=audio_index)
@@ -138,10 +143,12 @@ def transcribe_movie(
         merged = _merge(results)
         merged.provider = stt_config.type
         merged.model = stt_config.model
-        cleanup_chunks(chunks, keep=audio)
 
         _save_cache(cache_key, merged)
         _persist(db, movie, merged)
+        # квоту списываем только за реальную транскрипцию и только у провайдера с квотами
+        if provider_has_limits(stt_config.type):
+            usage_service.record_seconds(db, movie.duration or 0.0)
         progress(1.0, "транскрипт готов")
         log.info("Транскрипт готов для movie #%d: %d сегментов.", movie.id, len(merged.segments))
         return merged
@@ -149,6 +156,9 @@ def transcribe_movie(
         movie.transcription_status = TranscriptionStatus.ERROR
         db.commit()
         raise
+    finally:
+        # временные чанки чистим всегда (в т.ч. при падении), кэш-FLAC сохраняем
+        cleanup_chunks(chunks, keep=audio)
 
 
 def _persist(db: Session, movie: Movie, transcript: Transcript) -> None:

@@ -23,7 +23,9 @@ log = logging.getLogger(__name__)
 ProgressCb = Callable[[float, str], None] | None
 
 
-def _parse_json(text: str) -> dict:
+def _parse_json(text: str | bytes) -> dict:
+    if isinstance(text, (bytes, bytearray)):
+        text = text.decode("utf-8", errors="replace")  # защитный пояс от битых байтов
     text = (text or "").strip()
     try:
         return json.loads(text)

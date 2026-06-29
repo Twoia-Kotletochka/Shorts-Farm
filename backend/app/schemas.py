@@ -66,7 +66,10 @@ class JobCreate(BaseModel):
     subtitle_language: str | None = None
     effects: Effects = Effects()
     reframe: Literal["smartcrop", "blurpad"] = "smartcrop"
-    target_duration_sec: list[int] = [15, 45]  # [min, max]
+    target_duration_sec: list[int] = [15, 45]  # [min, max] — длина клипа (single)
+    # для format=compilation: длина каждого момента и общий бюджет монтажа
+    compilation_segment_sec: list[int] | None = None  # деф. [6,12]
+    compilation_total_sec: int | None = None           # деф. 60
     language: str | None = None
     audio_track: int | str | None = None  # индекс аудиодорожки или код языка ("rus"); None → авто
     allow_duplicates: bool = False
@@ -114,6 +117,8 @@ class JobBatchIn(BaseModel):
     effects: Effects = Effects()
     reframe: Literal["smartcrop", "blurpad"] = "smartcrop"
     target_duration_sec: list[int] = [15, 45]
+    compilation_segment_sec: list[int] | None = None
+    compilation_total_sec: int | None = None
     language: str | None = None
     audio_track: int | str | None = None
     allow_duplicates: bool = False
@@ -265,6 +270,10 @@ class SettingsUpdate(BaseModel):
     render: RenderIn | None = None
     retention_days: int | None = None
     backup: BackupIn | None = None
+
+
+class LoginIn(BaseModel):
+    password: str
 
 
 class ProviderTestIn(BaseModel):

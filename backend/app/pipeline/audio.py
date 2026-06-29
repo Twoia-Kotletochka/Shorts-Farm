@@ -64,27 +64,36 @@ def chunk_audio(
         raise FFmpegError(f"Не удалось определить длительность аудио: {audio_path}")
 
     bytes_per_sec = size / duration
-    chunk_sec = max(30.0, (max_bytes * SAFE_FRACTION) / bytes_per_sec)
-    step = max(10.0, chunk_sec - overlap_sec)
+    base_sec = max(30.0, (max_bytes * SAFE_FRACTION) / bytes_per_sec)
 
     chunks: list[AudioChunk] = []
     idx = 0
     start = 0.0
-    while start < duration:
+    while start < duration - 0.5:
         chunk_path = audio_path.with_name(f"{audio_path.stem}.part{idx:03d}.flac")
-        run([
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-            "-ss", f"{start:.3f}", "-t", f"{chunk_sec:.3f}",
-            "-i", str(audio_path),
-            "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "flac",
-            str(chunk_path),
-        ])
+        # FLAC сжимает по-разному (громкие участки — хуже): фактический размер может превысить
+        # лимит даже при оценке по среднему битрейту. Уменьшаем длительность, пока чанк не влезет.
+        cur = base_sec
+        for _ in range(5):
+            run([
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                "-ss", f"{start:.3f}", "-t", f"{cur:.3f}",
+                "-i", str(audio_path),
+                "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "flac",
+                str(chunk_path),
+            ])
+            if not (chunk_path.exists() and chunk_path.stat().st_size > 0):
+                break
+            if chunk_path.stat().st_size <= max_bytes or cur <= 30.0:
+                break
+            cur *= 0.6  # чанк не влез → короче и заново
         if chunk_path.exists() and chunk_path.stat().st_size > 0:
             chunks.append(AudioChunk(path=chunk_path, offset=start))
             idx += 1
-        start += step
+        # шаг = фактически покрытая длительность минус перекрытие (без пропусков)
+        start += max(10.0, cur - overlap_sec)
 
-    log.info("Аудио нарезано на %d чанков (~%.0f сек каждый).", len(chunks), chunk_sec)
+    log.info("Аудио нарезано на %d чанков.", len(chunks))
     return chunks
 
 

@@ -150,12 +150,14 @@ def delete_short(db: Session, short_id: int) -> None:
 
 def bulk(db: Session, ids: list[int], action: str) -> int:
     affected = 0
+    approved_ids: list[int] = []
     for sid in ids:
         s = db.get(Short, sid)
         if s is None:
             continue
         if action == "approve":
             s.status = ShortStatus.APPROVED
+            approved_ids.append(sid)
         elif action == "reject":
             s.status = ShortStatus.REJECTED
         elif action == "delete":
@@ -163,7 +165,6 @@ def bulk(db: Session, ids: list[int], action: str) -> int:
             db.delete(s)
         affected += 1
     db.commit()
-    if action == "approve":
-        for sid in ids:
-            _send("shorts.render_final", sid)
+    for sid in approved_ids:  # финал только для реально одобренных (существующих)
+        _send("shorts.render_final", sid)
     return affected

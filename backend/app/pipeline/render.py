@@ -68,9 +68,10 @@ def detect_edge_silence(
         new_start = start + max(0.0, lead)
     # хвостовая тишина: последний silence_start без последующего end → режем хвост
     if starts and (not ends or starts[-1] > (ends[-1] if ends else 0)):
-        tail_pos = starts[-1]
-        if dur - tail_pos < max_trim:
-            new_end = start + tail_pos
+        tail_silence = dur - starts[-1]          # длина хвостовой тишины
+        if tail_silence > 0.2:
+            trim = min(tail_silence, max_trim)   # срезаем хвост, но не больше max_trim
+            new_end = end - trim
     if new_end - new_start < 1.0:
         return start, end
     return round(new_start, 3), round(new_end, 3)
@@ -181,6 +182,8 @@ def concat_clips(paths: list[str], out_path: str, work_dir: Path) -> None:
     """Склейка одинаково отрендеренных сегментов (compilation) через concat demuxer."""
     work_dir.mkdir(parents=True, exist_ok=True)
     listfile = work_dir / "concat.txt"
-    listfile.write_text("".join(f"file '{p}'\n" for p in paths), encoding="utf-8")
+    # экранируем одинарные кавычки в путях для concat-демуксера: ' → '\''
+    lines = "".join("file '{}'\n".format(p.replace("'", "'\\''")) for p in paths)
+    listfile.write_text(lines, encoding="utf-8")
     run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(listfile),
          "-c", "copy", "-movflags", "+faststart", out_path], timeout=1800)

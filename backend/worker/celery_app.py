@@ -36,6 +36,8 @@ celery.conf.update(
         "priority_steps": list(range(10)),
         "queue_order_strategy": "priority",
     },
+    # файл расписания beat — вне bind-mounted /app (иначе пишет в репозиторий)
+    beat_schedule_filename="/tmp/celerybeat-schedule",
     # Периодические задачи (embedded beat: worker запускается с флагом -B)
     beat_schedule={
         "retention-daily": {"task": "maintenance.retention", "schedule": crontab(hour=4, minute=0)},

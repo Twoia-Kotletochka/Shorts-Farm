@@ -18,7 +18,8 @@ GROQ_DAILY_SEC = 28800.0  # на модель Whisper (free tier)
 
 
 def _today() -> str:
-    return dt.date.today().isoformat()
+    # квоты провайдеров сбрасываются по UTC — считаем по UTC-дате
+    return dt.datetime.now(dt.timezone.utc).date().isoformat()
 
 
 def _get(db: Session) -> dict:
