@@ -31,9 +31,27 @@ def _nearest(bounds: list[float], t: float, max_delta: float) -> float:
 
 
 def _overlaps(a0: float, a1: float, b0: float, b1: float, thresh: float = 0.3) -> bool:
+    """Существенно ли пересекаются интервалы (IoU = inter/union > thresh).
+
+    IoU симметричен и устойчив к разнице длин: короткий кандидат внутри огромного
+    интервала-конверта даёт малый IoU и НЕ считается дублем. Прежняя метрика
+    (доля от кратчайшего) при таком конверте отбраковывала вообще всё, из-за чего
+    повторный прогон на том же фильме выбирал 0 моментов.
+    """
     inter = max(0.0, min(a1, b1) - max(a0, b0))
-    shortest = min(a1 - a0, b1 - b0)
-    return shortest > 0 and inter > thresh * shortest
+    if inter <= 0.0:
+        return False
+    union = max(a1, b1) - min(a0, b0)
+    return union > 0.0 and inter / union > thresh
+
+
+def _existing_intervals(s: Short) -> list[tuple[float, float]]:
+    """Реальные нарезанные интервалы шортса: для compilation — список сегментов
+    из metadata_json, иначе — единственный интервал [start_ts, end_ts]."""
+    segs = (s.metadata_json or {}).get("segments")
+    if segs:
+        return [(seg["start"], seg["end"]) for seg in segs]
+    return [(s.start_ts, s.end_ts)]
 
 
 def _snap(
@@ -72,6 +90,7 @@ def select_moments(
     transcript: Transcript,
     scene_cuts: list[float] | None = None,
     allow_duplicates: bool = False,
+    total_budget: float | None = None,
 ) -> list[Candidate]:
     dur_min, dur_max = target_duration
     cuts = scene_cuts or []
@@ -82,18 +101,31 @@ def select_moments(
     existing: list[tuple[float, float]] = []
     if not allow_duplicates:
         rows = db.scalars(sa_select(Short).where(Short.movie_id == movie.id)).all()
-        existing = [(s.start_ts, s.end_ts) for s in rows]
+        existing = [iv for s in rows for iv in _existing_intervals(s)]
 
     chosen: list[Candidate] = []
+    acc = 0.0  # суммарная длительность отобранного (для бюджета компиляции)
     for c in sorted(snapped, key=lambda x: x.overall, reverse=True):
         if any(_overlaps(c.start, c.end, a, b) for a, b in existing):
             continue  # уже нарезанный момент (дедуп между запусками)
         if any(_overlaps(c.start, c.end, ch.start, ch.end) for ch in chosen):
             continue  # пересечение внутри текущего запуска
+        # Бюджет длительности (компиляция): не вылезаем за лимит. `continue`, а не
+        # `break`, — чтобы более короткий момент рейтингом ниже всё же влез в остаток.
+        # `chosen` в условии гарантирует хотя бы один сегмент, даже если он длиннее бюджета.
+        if total_budget is not None and chosen and acc + c.duration > total_budget:
+            continue
         c.moment_id = f"{movie.id}-{int(round(c.start))}-{int(round(c.end))}"
         chosen.append(c)
+        acc += c.duration
         if len(chosen) >= count:
             break
+        if total_budget is not None and acc >= total_budget:
+            break
 
-    log.info("Отбор: из %d кандидатов выбрано %d (count=%d).", len(snapped), len(chosen), count)
+    log.info(
+        "Отбор: из %d кандидатов выбрано %d (count=%d, бюджет=%s, итог≈%.1fс).",
+        len(snapped), len(chosen), count,
+        f"{total_budget:.0f}с" if total_budget is not None else "—", acc,
+    )
     return chosen

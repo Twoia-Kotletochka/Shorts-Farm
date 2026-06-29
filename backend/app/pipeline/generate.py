@@ -162,6 +162,16 @@ def run_generation(job_id: int) -> None:
         allow_dup = bool(params.get("allow_duplicates", False))
         fmt = params.get("format", "single")
 
+        # Компиляция должна остаться шортсом. target_duration_sec — длина ОДНОГО шортса
+        # (для single). Для compilation сегменты короче (compilation_segment_sec), а весь
+        # ролик ограничен общим бюджетом compilation_total_sec — иначе count×длина сегмента
+        # давало склейку в несколько минут (не «шортс»).
+        comp_budget: float | None = None
+        if fmt == "compilation":
+            seg = tuple(params.get("compilation_segment_sec", [6, 12]))[:2] or (6, 12)
+            target = (int(seg[0]), int(seg[1]))
+            comp_budget = float(params.get("compilation_total_sec", 60))
+
         if not ensure_disk():
             raise RuntimeError("Недостаточно места на диске для генерации.")
 
@@ -214,6 +224,7 @@ def run_generation(job_id: int) -> None:
         chosen = select_moments(
             db, movie, candidates, count=count, target_duration=target,
             transcript=transcript, scene_cuts=cuts, allow_duplicates=allow_dup,
+            total_budget=comp_budget,
         )
         if not chosen:
             job.status = JobStatus.DONE
@@ -308,10 +319,31 @@ def _make_compilation_draft(db, job: Job, movie: Movie, chosen, transcript: Tran
         preview_path=str(out), start_ts=chosen[0].start, end_ts=chosen[-1].end, duration=offset,
         category="compilation", hook_title=chosen[0].hook_title, rating_json=avg,
         reason="Компиляция лучших моментов", subtitles_json=soft, status=ShortStatus.DRAFT,
+        # реальные сегменты — чтобы дедуп при повторном прогоне сравнивал с настоящими
+        # интервалами, а не с конвертом [start_ts, end_ts] на весь фильм
+        metadata_json={"segments": [{"start": c.start, "end": c.end} for c in chosen]},
     )
     db.add(short)
     db.commit()
     return short
+
+
+def _build_burn_ass(db, movie: Movie, transcript, start: float, end: float,
+                    params: dict, llm_cfg, opts: RenderOptions, tag: str) -> str | None:
+    """Прожигаемый ASS для куска [start, end] (реплики перебазированы к 0).
+    None — если субтитры выключены или нет транскрипта. Один на сегмент компиляции."""
+    if not (opts.subtitles and transcript is not None):
+        return None
+    cues = slice_cues(transcript, start, end)
+    sub_lang = params.get("subtitle_language")
+    content_lang = transcript.language
+    if sub_lang and content_lang and sub_lang != content_lang:
+        cues = apply_translation(cues, translate_lines([c["text"] for c in cues], llm_cfg, sub_lang))
+    preset = _load_preset(db, params.get("subtitle_preset_id"))
+    ass_file = movie_subdir(movie) / f"{clip_basename(movie, start, end, tag)}.ass"
+    ass_file.parent.mkdir(parents=True, exist_ok=True)
+    ass_file.write_text(build_ass(cues, preset, opts.target_w, opts.target_h), encoding="utf-8")
+    return str(ass_file)
 
 
 # ===== финальный рендер (по одобрению) =====
@@ -329,50 +361,67 @@ def run_final_render(short_id: int) -> None:
         opts = _render_opts(params, render_settings)
 
         transcript = _load_transcript(db, movie.id)
-        start, end = short.start_ts, short.end_ts
-        if opts.trim_silence:
-            start, end = detect_edge_silence(source, start, end)
-
-        ass_path = None
-        if opts.subtitles and transcript is not None:
-            cues = slice_cues(transcript, start, end)
-            sub_lang = params.get("subtitle_language")
-            content_lang = transcript.language
-            if sub_lang and content_lang and sub_lang != content_lang:
-                cues = apply_translation(cues, translate_lines([c["text"] for c in cues], llm_cfg, sub_lang))
-            preset = _load_preset(db, params.get("subtitle_preset_id"))
-            base = clip_basename(movie, start, end, short.category)
-            ass_file = movie_subdir(movie) / f"{base}.ass"
-            ass_file.parent.mkdir(parents=True, exist_ok=True)
-            ass_file.write_text(build_ass(cues, preset, opts.target_w, opts.target_h), encoding="utf-8")
-            ass_path = str(ass_file)
-
-        base = clip_basename(movie, start, end, short.category)
-        out = movie_subdir(movie) / f"{base}.mp4"
-        crop = face_center_norm(source, start, end) if opts.reframe == "smartcrop" else None
         lang_pref = params.get("language") or ss.get_value(db, "default_language", "ru")
         audio_index = _resolve_audio_index(movie, params.get("audio_track"), lang_pref)
-        render_clip(
-            source, start, end, str(out), opts,
-            draft=False, crop_cx=crop, ass_path=ass_path, audio_index=audio_index,
-        )
+
+        # Компиляция: финал — пересборка склейки из сохранённых сегментов, а НЕ один
+        # кусок [start_ts, end_ts] (это конверт от первого до последнего момента —
+        # мог охватывать почти весь фильм). Каждый сегмент рендерим в финал-качестве
+        # (свой crop/прожиг субтитров/обрезка тишины), затем concat.
+        segments = (short.metadata_json or {}).get("segments") if short.category == "compilation" else None
+        base = clip_basename(movie, short.start_ts, short.end_ts, short.category)
+        out = movie_subdir(movie) / f"{base}.mp4"
+
+        if segments:
+            workdir = movie_subdir(movie) / f"final{short.id}_tmp"
+            seg_files: list[str] = []
+            total = 0.0
+            for i, seg in enumerate(segments):
+                s, e = float(seg["start"]), float(seg["end"])
+                if opts.trim_silence:
+                    s, e = detect_edge_silence(source, s, e)
+                ass_path = _build_burn_ass(db, movie, transcript, s, e, params, llm_cfg, opts, f"compilation{i:03d}")
+                crop = face_center_norm(source, s, e) if opts.reframe == "smartcrop" else None
+                segf = workdir / f"seg{i:03d}.mp4"
+                render_clip(source, s, e, str(segf), opts, draft=False,
+                            crop_cx=crop, ass_path=ass_path, audio_index=audio_index)
+                seg_files.append(str(segf))
+                total += max(0.0, e - s)
+            concat_clips(seg_files, str(out), workdir)
+            shutil.rmtree(workdir, ignore_errors=True)
+            final_dur = round(total, 3)
+        else:
+            start, end = short.start_ts, short.end_ts
+            if opts.trim_silence:
+                start, end = detect_edge_silence(source, start, end)
+            ass_path = _build_burn_ass(db, movie, transcript, start, end, params, llm_cfg, opts, short.category)
+            crop = face_center_norm(source, start, end) if opts.reframe == "smartcrop" else None
+            render_clip(source, start, end, str(out), opts, draft=False,
+                        crop_cx=crop, ass_path=ass_path, audio_index=audio_index)
+            final_dur = round(end - start, 3)
 
         thumb = thumb_path(base)
         make_thumbnail(str(out), str(thumb))
 
         short.file_path = str(out)
         short.thumb_path = str(thumb)
-        short.duration = round(end - start, 3)
+        short.duration = final_dur
         db.commit()
 
         # метаданные (для финала)
         if transcript is not None:
-            text = " ".join(c["text"] for c in slice_cues(transcript, start, end))
-            short.metadata_json = generate_metadata(
+            if segments:
+                cues = [c for seg in segments
+                        for c in slice_cues(transcript, float(seg["start"]), float(seg["end"]))]
+            else:
+                cues = slice_cues(transcript, short.start_ts, short.end_ts)
+            text = " ".join(c["text"] for c in cues)
+            md = dict(short.metadata_json or {})  # сохраняем segments (дедуп compilation)
+            md.update(generate_metadata(
                 hook_title=short.hook_title or "", category=short.category,
-                transcript_text=text, llm_config=llm_cfg,
-                language=params.get("language") or ss.get_value(db, "default_language", "ru"),
-            )
+                transcript_text=text, llm_config=llm_cfg, language=lang_pref,
+            ))
+            short.metadata_json = md
             db.commit()
         log.info("Финальный рендер шортса #%d готов: %s", short_id, out.name)
     except Exception:  # noqa: BLE001
