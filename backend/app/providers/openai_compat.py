@@ -7,6 +7,9 @@ base_url / api_key / model. Не-совместимые провайдеры —
 from __future__ import annotations
 
 import logging
+import random
+import time
+from collections.abc import Callable
 
 import httpx
 
@@ -21,9 +24,53 @@ log = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=60.0, pool=10.0)
 
+# Повтор с backoff на временные ошибки (квоты/перегрузка/сеть) — см. файл 03.
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+MAX_ATTEMPTS = 4
+BASE_DELAY = 1.5
+MAX_DELAY = 30.0
+
 
 def _auth_headers(api_key: str | None) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
+def _retry_after(resp: httpx.Response) -> float | None:
+    raw = resp.headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None  # HTTP-дату не парсим — используем backoff
+
+
+def _sleep_backoff(attempt: int, retry_after: float | None) -> None:
+    if retry_after is not None:
+        delay = min(retry_after, MAX_DELAY)
+    else:
+        delay = min(BASE_DELAY * (2 ** (attempt - 1)), MAX_DELAY)
+        delay += random.uniform(0, 0.5 * delay)  # джиттер против синхронных повторов
+    log.warning("Провайдер вернул временную ошибку — повтор через %.1fс (попытка %d/%d).",
+                delay, attempt, MAX_ATTEMPTS)
+    time.sleep(delay)
+
+
+def _with_retry(do_request: Callable[[], httpx.Response]) -> httpx.Response:
+    """Выполнить запрос с повтором на 429/5xx/таймаут. Возвращает последний ответ."""
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            resp = do_request()
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            if attempt >= MAX_ATTEMPTS:
+                raise ProviderError(f"Сеть/таймаут после {attempt} попыток: {exc}") from exc
+            _sleep_backoff(attempt, None)
+            continue
+        if resp.status_code in RETRYABLE_STATUS and attempt < MAX_ATTEMPTS:
+            _sleep_backoff(attempt, _retry_after(resp))
+            continue
+        return resp
+    raise ProviderError("Не удалось выполнить запрос к провайдеру.")
 
 
 class OpenAICompatLLM:
@@ -56,12 +103,12 @@ class OpenAICompatLLM:
             payload["response_format"] = response_format
 
         try:
-            resp = httpx.post(
+            resp = _with_retry(lambda: httpx.post(
                 f"{self.base_url}/chat/completions",
                 json=payload,
                 headers=_auth_headers(self.api_key),
                 timeout=DEFAULT_TIMEOUT,
-            )
+            ))
             resp.raise_for_status()
             data = resp.json()
             return data["choices"][0]["message"]["content"] or ""
@@ -95,15 +142,17 @@ class OpenAICompatSTT:
             data["language"] = language
 
         try:
+            # читаем байты один раз — чтобы повторы не упирались в исчерпанный файловый дескриптор
             with open(audio_path, "rb") as fh:
-                files = {"file": (audio_path.rsplit("/", 1)[-1], fh, "application/octet-stream")}
-                resp = httpx.post(
-                    f"{self.base_url}/audio/transcriptions",
-                    data=data,
-                    files=files,
-                    headers=_auth_headers(self.api_key),
-                    timeout=DEFAULT_TIMEOUT,
-                )
+                content = fh.read()
+            fname = audio_path.rsplit("/", 1)[-1]
+            resp = _with_retry(lambda: httpx.post(
+                f"{self.base_url}/audio/transcriptions",
+                data=data,
+                files={"file": (fname, content, "application/octet-stream")},
+                headers=_auth_headers(self.api_key),
+                timeout=DEFAULT_TIMEOUT,
+            ))
             resp.raise_for_status()
             return _parse_transcription(resp.json(), provider="openai_compat", model=self.model)
         except httpx.HTTPStatusError as exc:
@@ -152,11 +201,11 @@ def _parse_transcription(payload: dict, *, provider: str, model: str) -> Transcr
 
 def _list_models(base_url: str, api_key: str | None) -> list[str]:
     try:
-        resp = httpx.get(
+        resp = _with_retry(lambda: httpx.get(
             f"{base_url.rstrip('/')}/models",
             headers=_auth_headers(api_key),
             timeout=httpx.Timeout(15.0),
-        )
+        ))
         resp.raise_for_status()
         data = resp.json()
         return [m.get("id", "") for m in data.get("data", []) if m.get("id")]
