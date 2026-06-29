@@ -152,8 +152,8 @@ class OpenAICompatSTT:
         data: dict = {
             "model": self.model,
             "response_format": "verbose_json",
-            # word-level таймкоды (Groq/OpenAI). Сегментные тоже придут.
-            "timestamp_granularities[]": "word",
+            # И сегменты, И слова: без "segment" Groq отдаёт только words без нормальной сегментации.
+            "timestamp_granularities[]": ["segment", "word"],
         }
         if language:
             data["language"] = language
@@ -181,37 +181,40 @@ class OpenAICompatSTT:
         return _list_models(self.base_url, self.api_key)
 
 
+def _join_words(words: list[Word]) -> str:
+    return " ".join(w.word.strip() for w in words if w.word.strip())
+
+
 def _parse_transcription(payload: dict, *, provider: str, model: str) -> Transcript:
     language = payload.get("language")
     raw_segments = payload.get("segments") or []
-    raw_words = payload.get("words") or []
+    all_words = [
+        Word(word=w.get("word", ""), start=float(w.get("start", 0)), end=float(w.get("end", 0)))
+        for w in (payload.get("words") or [])
+    ]
 
     segments: list[TranscriptSegment] = []
     for seg in raw_segments:
+        s = float(seg.get("start", 0))
+        e = float(seg.get("end", 0))
         seg_words = [
             Word(word=w.get("word", ""), start=float(w.get("start", 0)), end=float(w.get("end", 0)))
             for w in (seg.get("words") or [])
         ]
+        # сегмент без своих слов, но есть общий список → берём слова из его диапазона
+        if not seg_words and all_words:
+            seg_words = [w for w in all_words if w.start >= s - 0.01 and w.end <= e + 0.01]
+        text = (seg.get("text") or "").strip() or _join_words(seg_words)
+        segments.append(TranscriptSegment(start=s, end=e, text=text, words=seg_words))
+
+    # Совсем нет сегментов (только words) — один сегмент как фолбэк, текст с пробелами.
+    if not segments and all_words:
         segments.append(
             TranscriptSegment(
-                start=float(seg.get("start", 0)),
-                end=float(seg.get("end", 0)),
-                text=(seg.get("text") or "").strip(),
-                words=seg_words,
+                start=all_words[0].start, end=all_words[-1].end,
+                text=_join_words(all_words), words=all_words,
             )
         )
-
-    # Если сегментов нет, но есть отдельный массив words — собираем один сегмент.
-    if not segments and raw_words:
-        words = [
-            Word(word=w.get("word", ""), start=float(w.get("start", 0)), end=float(w.get("end", 0)))
-            for w in raw_words
-        ]
-        text = "".join(w.word for w in words).strip() or (payload.get("text") or "")
-        if words:
-            segments.append(
-                TranscriptSegment(start=words[0].start, end=words[-1].end, text=text, words=words)
-            )
 
     return Transcript(segments=segments, language=language, provider=provider, model=model)
 
