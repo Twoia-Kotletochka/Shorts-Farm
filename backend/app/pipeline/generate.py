@@ -26,6 +26,7 @@ from ..services import usage_service
 from ..storage import audio_cache_dir, sources_dir
 from . import signals
 from .analyze import analyze
+from .audio import audio_key
 from .maintenance import ensure_disk
 from .metadata import generate_metadata
 from .paths import clip_basename, movie_subdir, thumb_path
@@ -95,6 +96,34 @@ def _load_preset(db: Session, preset_id: int | None) -> dict | None:
     }
 
 
+def _resolve_audio_index(movie: Movie, audio_track, prefer_lang: str | None) -> int | None:
+    """Выбор аудиодорожки: явный индекс/язык → язык контента → default → макс. каналы → None (авто)."""
+    tracks = (movie.metadata_json or {}).get("audio_tracks", []) or []
+
+    if isinstance(audio_track, int):
+        return audio_track
+    if isinstance(audio_track, str) and audio_track.strip():
+        sel = audio_track.strip().lower()
+        for t in tracks:
+            if (t.get("language") or "").lower().startswith(sel[:3]):
+                return t.get("index")
+        if sel.isdigit():
+            return int(sel)
+
+    if not tracks:
+        return None
+    if prefer_lang:
+        pl = prefer_lang.lower()[:2]
+        for t in tracks:
+            if (t.get("language") or "").lower().startswith(pl):
+                return t.get("index")
+    for t in tracks:
+        if t.get("default"):
+            return t.get("index")
+    best = max(tracks, key=lambda t: t.get("channels") or 0)
+    return best.get("index")
+
+
 def _stage(db, job: Job, stage: str, progress: float) -> None:
     job.stage = stage
     job.progress = round(progress, 3)
@@ -148,7 +177,11 @@ def run_generation(job_id: int) -> None:
             job.progress = round(0.05 + 0.35 * p, 3)
             db.commit()
 
-        transcript = transcribe_movie(db, movie, stt_cfg, language=None, progress_cb=tcb)
+        audio_index = _resolve_audio_index(movie, params.get("audio_track"), language)
+        log.info("Задача #%d: аудиодорожка = %s", job.id, audio_index)
+        transcript = transcribe_movie(
+            db, movie, stt_cfg, language=None, audio_index=audio_index, progress_cb=tcb
+        )
         usage_service.record_seconds(db, movie.duration or 0.0)
         if _is_canceled(db, job_id):
             return
@@ -158,7 +191,8 @@ def run_generation(job_id: int) -> None:
         if params.get("scene_detect"):
             _stage(db, job, JobStage.SCENE_DETECT, 0.42)
             cuts = signals.scene_cuts(source)
-        audio_path = audio_cache_dir() / f"{movie.file_hash or f'movie-{movie.id}'}.flac"
+        file_hash = movie.file_hash or f"movie-{movie.id}"
+        audio_path = audio_cache_dir() / f"{audio_key(file_hash, audio_index)}.flac"
         rms, win = signals.audio_energy_envelope(str(audio_path)) if audio_path.exists() else (None, 1.0)
 
         # --- анализ ---

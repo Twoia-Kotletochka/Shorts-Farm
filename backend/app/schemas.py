@@ -16,6 +16,16 @@ class ScanResult(BaseModel):
     total: int
 
 
+class AudioTrack(BaseModel):
+    index: int                      # относительный индекс среди аудио (для -map 0:a:N)
+    stream_index: int | None = None
+    language: str | None = None
+    title: str | None = None
+    channels: int | None = None
+    codec: str | None = None
+    default: bool = False
+
+
 class MovieOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -29,6 +39,7 @@ class MovieOut(BaseModel):
     height: int | None = None
     fps: float | None = None
     transcription_status: str
+    audio_tracks: list[AudioTrack] = []
     added_at: datetime
 
 
@@ -57,6 +68,7 @@ class JobCreate(BaseModel):
     reframe: Literal["smartcrop", "blurpad"] = "smartcrop"
     target_duration_sec: list[int] = [15, 45]  # [min, max]
     language: str | None = None
+    audio_track: int | str | None = None  # индекс аудиодорожки или код языка ("rus"); None → авто
     allow_duplicates: bool = False
     profile_id: int | None = None
     priority: int | None = Field(default=None, ge=0, le=9)
@@ -103,6 +115,7 @@ class JobBatchIn(BaseModel):
     reframe: Literal["smartcrop", "blurpad"] = "smartcrop"
     target_duration_sec: list[int] = [15, 45]
     language: str | None = None
+    audio_track: int | str | None = None
     allow_duplicates: bool = False
     profile_id: int | None = None
     priority: int | None = Field(default=None, ge=0, le=9)

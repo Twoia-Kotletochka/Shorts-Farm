@@ -79,13 +79,36 @@ def _walk_videos(root: Path):
             yield Path(dirpath) / fn
 
 
+def _backfill_metadata(movie: Movie, path: Path) -> None:
+    """Дозаполнить новые поля у ранее отсканированного фильма (напр. audio_tracks)."""
+    md = dict(movie.metadata_json or {})
+    if md.get("audio_tracks"):
+        return  # уже есть — не трогаем
+    try:
+        probe = ffprobe(str(path))
+    except ProbeError as exc:
+        log.warning("Бэкфилл ffprobe не удался для %s: %s", movie.rel_path, exc)
+        return
+    md["audio_tracks"] = probe.get("audio_tracks", [])
+    md.setdefault("codec", probe.get("codec"))
+    md.setdefault("container", probe.get("container"))
+    movie.metadata_json = md  # новый объект → SQLAlchemy увидит изменение
+    if not movie.duration:
+        movie.duration = probe.get("duration")
+    if not movie.width:
+        movie.width = probe.get("width")
+        movie.height = probe.get("height")
+        movie.fps = probe.get("fps")
+    log.info("Бэкфилл audio_tracks для %s: %d дорожек.", movie.rel_path, len(md["audio_tracks"]))
+
+
 def scan_library(db: Session) -> tuple[int, int]:
     """→ (added, total_found)."""
     root = sources_dir()
     if not root.exists():
         return 0, 0
 
-    existing = set(db.scalars(select(Movie.rel_path)).all())
+    existing = {m.rel_path: m for m in db.scalars(select(Movie)).all()}
 
     found = 0
     added = 0
@@ -93,6 +116,7 @@ def scan_library(db: Session) -> tuple[int, int]:
         rel = str(path.relative_to(root))
         found += 1
         if rel in existing:
+            _backfill_metadata(existing[rel], path)  # дозаполнить новые поля (напр. audio_tracks)
             continue
 
         stem = path.stem
@@ -124,10 +148,14 @@ def scan_library(db: Session) -> tuple[int, int]:
             file_hash=quick_signature(path, size) if size else None,
             status=status,
             transcription_status=TranscriptionStatus.NONE,
-            metadata_json={"codec": probe.get("codec"), "container": probe.get("container")},
+            metadata_json={
+                "codec": probe.get("codec"),
+                "container": probe.get("container"),
+                "audio_tracks": probe.get("audio_tracks", []),
+            },
         )
         db.add(movie)
-        existing.add(rel)
+        existing[rel] = movie
         added += 1
 
     db.commit()

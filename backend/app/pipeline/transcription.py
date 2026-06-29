@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..models import Movie, Transcript as TranscriptRow, TranscriptionStatus
 from ..providers import ProviderConfig, Transcript, TranscriptSegment, Word, build_stt
 from ..storage import sources_dir, transcripts_cache_dir
-from .audio import chunk_audio, cleanup_chunks, extract_audio
+from .audio import audio_key, chunk_audio, cleanup_chunks, extract_audio
 
 log = logging.getLogger(__name__)
 
@@ -90,11 +90,16 @@ def transcribe_movie(
     stt_config: ProviderConfig,
     *,
     language: str | None = None,
+    audio_index: int | None = None,
     progress_cb: ProgressCb = None,
     force: bool = False,
 ) -> Transcript:
-    """Полная транскрипция фильма (с кэшем). Возвращает Transcript с word-таймкодами."""
+    """Полная транскрипция фильма (с кэшем). Возвращает Transcript с word-таймкодами.
+
+    audio_index — выбранная аудиодорожка (None → авто). Кэш отдельный на каждую дорожку.
+    """
     file_hash = movie.file_hash or f"movie-{movie.id}"
+    cache_key = audio_key(file_hash, audio_index)
 
     def progress(p: float, msg: str) -> None:
         if progress_cb:
@@ -102,9 +107,9 @@ def transcribe_movie(
 
     # 1) кэш
     if not force:
-        cached = _load_cache(file_hash)
+        cached = _load_cache(cache_key)
         if cached is not None:
-            log.info("Транскрипт из кэша для movie #%d.", movie.id)
+            log.info("Транскрипт из кэша для movie #%d (дорожка %s).", movie.id, audio_index)
             _persist(db, movie, cached)
             progress(1.0, "транскрипт из кэша")
             return cached
@@ -121,7 +126,7 @@ def transcribe_movie(
     provider = build_stt(stt_config)
     try:
         progress(0.05, "извлечение аудио")
-        audio = extract_audio(movie_path, file_hash)
+        audio = extract_audio(movie_path, file_hash, audio_index=audio_index)
         chunks = chunk_audio(audio)
 
         results: list[tuple[Transcript, float]] = []
@@ -135,7 +140,7 @@ def transcribe_movie(
         merged.model = stt_config.model
         cleanup_chunks(chunks, keep=audio)
 
-        _save_cache(file_hash, merged)
+        _save_cache(cache_key, merged)
         _persist(db, movie, merged)
         progress(1.0, "транскрипт готов")
         log.info("Транскрипт готов для movie #%d: %d сегментов.", movie.id, len(merged.segments))

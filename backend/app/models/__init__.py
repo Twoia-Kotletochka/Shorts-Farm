@@ -103,6 +103,11 @@ class Movie(Base):
         back_populates="movie", cascade="all, delete-orphan"
     )
 
+    @property
+    def audio_tracks(self) -> list:
+        """Аудиодорожки из metadata_json (заполняется сканом) — для выбора дорожки в панели."""
+        return (self.metadata_json or {}).get("audio_tracks", [])
+
 
 class Transcript(Base):
     __tablename__ = "transcripts"

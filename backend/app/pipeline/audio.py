@@ -22,18 +22,28 @@ class AudioChunk:
     offset: float  # абсолютное смещение начала чанка в полном аудио (сек)
 
 
-def extract_audio(movie_path: Path, file_hash: str, *, force: bool = False) -> Path:
-    """ffmpeg → 16 кГц моно FLAC в cache/audio. Кэшируется по хешу файла."""
-    out = audio_cache_dir() / f"{file_hash}.flac"
+def audio_key(file_hash: str, audio_index: int | None) -> str:
+    """Ключ кэша аудио/транскрипта. Разные дорожки → разные ключи."""
+    return file_hash if audio_index is None else f"{file_hash}-a{audio_index}"
+
+
+def extract_audio(
+    movie_path: Path, file_hash: str, *, audio_index: int | None = None, force: bool = False
+) -> Path:
+    """ffmpeg → 16 кГц моно FLAC в cache/audio. Кэш по хешу файла + индексу дорожки.
+
+    audio_index — относительный индекс аудиодорожки (0:a:N). None → ffmpeg сам выберет «лучшую».
+    """
+    out = audio_cache_dir() / f"{audio_key(file_hash, audio_index)}.flac"
     if out.exists() and not force and out.stat().st_size > 0:
         log.info("Аудио из кэша: %s", out.name)
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
-    run([
-        "ffmpeg", "-y", "-i", str(movie_path),
-        "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
-        "-c:a", "flac", str(out),
-    ])
+    cmd = ["ffmpeg", "-y", "-i", str(movie_path)]
+    if audio_index is not None:
+        cmd += ["-map", f"0:a:{audio_index}"]
+    cmd += ["-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "flac", str(out)]
+    run(cmd)
     log.info("Аудио извлечено: %s (%.1f МБ)", out.name, out.stat().st_size / 1024 / 1024)
     return out
 

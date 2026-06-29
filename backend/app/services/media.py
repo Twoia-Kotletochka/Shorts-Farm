@@ -67,6 +67,25 @@ def ffprobe(path: str) -> dict:
         fps = _parse_fps(video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate"))
         codec = video_stream.get("codec_name")
 
+    # Перечисляем аудиодорожки. index — относительный среди аудио (для -map 0:a:N).
+    audio_tracks: list[dict] = []
+    audio_index = 0
+    for s in data.get("streams", []):
+        if s.get("codec_type") != "audio":
+            continue
+        tags = s.get("tags", {}) or {}
+        disp = s.get("disposition", {}) or {}
+        audio_tracks.append({
+            "index": audio_index,
+            "stream_index": s.get("index"),
+            "language": tags.get("language"),
+            "title": tags.get("title"),
+            "channels": s.get("channels"),
+            "codec": s.get("codec_name"),
+            "default": bool(disp.get("default")),
+        })
+        audio_index += 1
+
     return {
         "duration": duration,
         "width": width,
@@ -74,4 +93,5 @@ def ffprobe(path: str) -> dict:
         "fps": fps,
         "codec": codec,
         "container": fmt.get("format_name"),
+        "audio_tracks": audio_tracks,
     }
