@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.config import get_settings
 
@@ -30,12 +31,21 @@ celery.conf.update(
     broker_connection_retry_on_startup=True,
     result_expires=60 * 60 * 24 * 7,     # неделя
     timezone="UTC",
-    # Поддержка приоритета на Redis (PATCH /api/jobs/{id}/priority — фаза H)
+    # Поддержка приоритета на Redis (PATCH /api/jobs/{id}/priority)
     broker_transport_options={
         "priority_steps": list(range(10)),
         "queue_order_strategy": "priority",
     },
+    # Периодические задачи (embedded beat: worker запускается с флагом -B)
+    beat_schedule={
+        "retention-daily": {"task": "maintenance.retention", "schedule": crontab(hour=4, minute=0)},
+        "backup-daily": {"task": "maintenance.backup", "schedule": crontab(hour=4, minute=30)},
+    },
 )
+
+# Задачи (worker.tasks) подхватываются воркером лениво; API шлёт их по имени (send_task),
+# не импортируя тяжёлый пайплайн.
+celery.autodiscover_tasks(["worker"])
 
 
 @celery.task(name="health.ping")

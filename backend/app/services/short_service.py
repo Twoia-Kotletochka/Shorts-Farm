@@ -19,6 +19,15 @@ log = logging.getLogger(__name__)
 _RATING_KEYS = ("overall", "retention", "emotion", "dynamics", "virality")
 
 
+def _send(task_name: str, short_id: int) -> None:
+    try:
+        from worker.celery_app import celery
+
+        celery.send_task(task_name, args=[short_id], queue="render")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Не удалось поставить %s для шортса #%s: %s", task_name, short_id, exc)
+
+
 def _exists(path: str | None) -> bool:
     return bool(path) and Path(path).exists()
 
@@ -101,7 +110,8 @@ def patch_short(db: Session, short_id: int, *, start_ts=None, end_ts=None, subti
         s.duration = max(0.0, (s.end_ts or 0.0) - (s.start_ts or 0.0))
     db.commit()
     db.refresh(s)
-    # if needs_rerender: enqueue_rerender(s)  # фаза H
+    if needs_rerender:
+        _send("shorts.rerender", short_id)  # правка краёв → перерендер (финал, если он уже был)
     return s, needs_rerender
 
 
@@ -110,7 +120,7 @@ def approve_short(db: Session, short_id: int) -> Short:
     s.status = ShortStatus.APPROVED
     db.commit()
     db.refresh(s)
-    # enqueue_final_render(s)  # фаза G/H — прожиг субтитров и финальный рендер
+    _send("shorts.render_final", short_id)  # финальный рендер: прожиг субтитров + эффекты
     return s
 
 
@@ -153,4 +163,7 @@ def bulk(db: Session, ids: list[int], action: str) -> int:
             db.delete(s)
         affected += 1
     db.commit()
+    if action == "approve":
+        for sid in ids:
+            _send("shorts.render_final", sid)
     return affected

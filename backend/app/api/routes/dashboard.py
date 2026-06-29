@@ -15,6 +15,7 @@ from ...providers import ProviderConfig, provider_has_limits
 from ...providers.factory import REQUIRES_KEY
 from ...schemas import DiskUsage, StatsOut, UsageOut, UsageProvider
 from ...services import settings_service as ss
+from ...services import usage_service
 from ...storage import disk_usage_gb
 
 router = APIRouter(tags=["dashboard"])
@@ -23,7 +24,7 @@ router = APIRouter(tags=["dashboard"])
 _GROQ_STT_DAILY_SEC = 28800.0
 
 
-def _usage_provider(cfg: ProviderConfig, kind: str) -> UsageProvider:
+def _usage_provider(cfg: ProviderConfig, kind: str, used_today: float = 0.0) -> UsageProvider:
     has_limits = provider_has_limits(cfg.type)
     configured = bool(
         cfg.model and cfg.base_url and (cfg.api_key or cfg.type not in REQUIRES_KEY)
@@ -31,9 +32,10 @@ def _usage_provider(cfg: ProviderConfig, kind: str) -> UsageProvider:
     limit = None
     used = None
     if has_limits:
-        used = 0.0  # реальный расход — фаза H
+        used = 0.0
         if kind == "stt" and cfg.type == "groq":
             limit = _GROQ_STT_DAILY_SEC
+            used = used_today
     return UsageProvider(
         provider=cfg.type or "—",
         has_limits=has_limits,
@@ -48,9 +50,10 @@ def usage(db: Session = Depends(get_db)) -> UsageOut:
     llm_cfg = ss.get_provider_config(db, "llm")
     stt_cfg = ss.get_provider_config(db, "stt")
     free_gb, total_gb = disk_usage_gb()
+    stt_used = usage_service.get_today_seconds(db)
     return UsageOut(
         llm=_usage_provider(llm_cfg, "llm"),
-        stt=_usage_provider(stt_cfg, "stt"),
+        stt=_usage_provider(stt_cfg, "stt", used_today=stt_used),
         disk=DiskUsage(free_gb=free_gb, total_gb=total_gb),
     )
 

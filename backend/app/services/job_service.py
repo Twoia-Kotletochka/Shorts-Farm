@@ -18,6 +18,17 @@ from . import settings_service as ss
 log = logging.getLogger(__name__)
 
 
+def enqueue_job(job: Job) -> None:
+    """Поставить задачу генерации в очередь (с приоритетом). По имени — без импорта пайплайна."""
+    try:
+        from worker.celery_app import celery
+
+        result = celery.send_task("jobs.run", args=[job.id], queue="network", priority=job.priority)
+        job.celery_task_id = result.id
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Не удалось поставить задачу #%s в очередь: %s", job.id, exc)
+
+
 def _build_params(payload: JobCreate, profile: Profile | None) -> dict:
     """Приоритет значений: явно заданные пользователем > профиль > дефолты схемы."""
     full = payload.model_dump()
@@ -49,7 +60,8 @@ def create_job(db: Session, payload: JobCreate) -> Job:
     db.add(job)
     db.commit()
     db.refresh(job)
-    # enqueue_job(job) — подключается в фазе H, когда появится пайплайн в воркере.
+    enqueue_job(job)
+    db.commit()
     log.info("Создана задача #%d для movie #%d.", job.id, job.movie_id)
     return job
 
@@ -69,6 +81,8 @@ def repeat_job(db: Session, job_id: int) -> Job:
     db.add(job)
     db.commit()
     db.refresh(job)
+    enqueue_job(job)
+    db.commit()
     return job
 
 
@@ -108,10 +122,13 @@ def estimate(db: Session, movie_id: int) -> dict:
         return {"unlimited": True}
     movie = db.get(Movie, movie_id)
     needed = float(movie.duration) if movie and movie.duration else None
-    # fits_today сверяется с реальным остатком квоты в фазе H; пока оптимистично.
+    from .usage_service import remaining_seconds
+
+    remaining = remaining_seconds(db)
+    fits = needed is None or needed <= remaining
     return {
         "whisper_audio_sec_needed": needed,
-        "fits_today": True,
+        "fits_today": fits,
         "unlimited": False,
     }
 
@@ -133,7 +150,7 @@ def create_batch(db: Session, payload: JobBatchIn) -> list[int]:
     base = payload.model_dump(exclude={"series", "season", "movie_ids"})
     priority = base.get("priority") if base.get("priority") is not None else 5
 
-    job_ids: list[int] = []
+    jobs: list[Job] = []
     for movie_id in movie_ids:
         params = dict(base)
         params["movie_id"] = movie_id
@@ -145,8 +162,10 @@ def create_batch(db: Session, payload: JobBatchIn) -> list[int]:
             status=JobStatus.QUEUED,
         )
         db.add(job)
-        db.flush()
-        job_ids.append(job.id)
+        jobs.append(job)
     db.commit()
-    log.info("Пакет: создано %d задач.", len(job_ids))
-    return job_ids
+    for job in jobs:
+        enqueue_job(job)
+    db.commit()
+    log.info("Пакет: создано %d задач.", len(jobs))
+    return [job.id for job in jobs]
