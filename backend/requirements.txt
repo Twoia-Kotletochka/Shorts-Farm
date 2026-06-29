@@ -1,0 +1,25 @@
+# --- веб/API ---
+fastapi>=0.115,<0.200
+uvicorn[standard]>=0.34,<0.40
+pydantic>=2.9,<3
+pydantic-settings>=2.6,<3
+python-multipart>=0.0.18
+
+# --- БД ---
+SQLAlchemy>=2.0.36,<2.1
+alembic>=1.14,<2
+
+# --- очередь ---
+celery[redis]>=5.4,<6
+redis>=5.2,<6
+
+# --- секреты ---
+cryptography>=44,<46
+
+# --- HTTP-клиент к провайдерам (Groq/OpenRouter/Ollama/OpenAI) ---
+httpx>=0.28,<0.29
+
+# --- пайплайн (фазы E–G): анализ сцен и smart-crop ---
+scenedetect>=0.6.4,<0.7
+opencv-python-headless>=4.10,<5
+numpy>=1.26,<3

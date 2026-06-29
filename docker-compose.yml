@@ -1,0 +1,71 @@
+# Shorts Farm — оркестрация сервисов.
+# Сервис `frontend` добавится в фронтенд-сессии.
+# Запуск:  docker compose up -d --build
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    env_file: .env
+    user: "1000:1000"
+    volumes:
+      - ./backend:/app
+      - ${STORAGE_PATH_HOST:-/srv/storage/shorts-farm}:/srv/storage
+    ports:
+      # Привязка к интерфейсу хоста из .env (LAN-IP или 127.0.0.1) — панель не наружу.
+      - "${API_BIND_HOST:-127.0.0.1}:${API_PORT:-8000}:8000"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  worker:
+    build: ./backend
+    command:
+      - "celery"
+      - "-A"
+      - "worker.celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--concurrency=${WORKER_CONCURRENCY:-2}"
+      - "-Q"
+      - "render,network,default"
+    env_file: .env
+    user: "1000:1000"
+    # Доступ к GPU-узлу для аппаратного энкода (VAAPI). Откат на libx264 — в коде.
+    group_add:
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-992}"
+    devices:
+      - "/dev/dri:/dev/dri"
+    volumes:
+      - ./backend:/app
+      - ${STORAGE_PATH_HOST:-/srv/storage/shorts-farm}:/srv/storage
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    env_file: .env
+    environment:
+      # 1 = MSW-моки в браузере (бэкенд не обязателен); 0 = живой API через прокси на api:8000.
+      VITE_API_MOCK: "${VITE_API_MOCK:-1}"
+      VITE_API_PROXY_TARGET: "http://api:8000"
+      FRONTEND_PORT: "${FRONTEND_PORT:-5173}"
+    volumes:
+      - ./frontend:/app
+      # анонимный volume: node_modules из образа не затирается bind-монтированием хоста
+      - /app/node_modules
+    ports:
+      # Публикуется на тот же LAN-интерфейс, что и API; панель не наружу.
+      - "${API_BIND_HOST:-127.0.0.1}:${FRONTEND_PORT:-5173}:5173"
+    restart: unless-stopped
+
+volumes:
+  redis-data:

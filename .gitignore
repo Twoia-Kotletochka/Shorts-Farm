@@ -1,0 +1,33 @@
+# --- секреты и окружение ---
+.env
+*.key
+
+# --- данные/медиа/кэш/бэкапы (вне репозитория) ---
+/srv/storage
+storage/
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- Node / фронтенд ---
+node_modules/
+dist/
+.vite/
+# MSW-воркер генерируется в рантайме (npx msw init) под версию пакета
+frontend/public/mockServiceWorker.js
+
+# --- ОС / редакторы ---
+.DS_Store
+*.swp
+.idea/
+.vscode/
