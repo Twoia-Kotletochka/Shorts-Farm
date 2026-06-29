@@ -2,21 +2,24 @@ import { Link } from 'react-router-dom'
 import { Check, Clapperboard, Film, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useMovies } from '@/api/hooks'
-import { Badge, Button, EmptyState, Input, Skeleton } from '@/components/ui'
+import { Badge, Button, EmptyState, Field, Input, Select, Skeleton } from '@/components/ui'
 import { QueryBoundary } from '@/components/common/QueryBoundary'
 import { TranscriptionBadge } from '@/components/common/badges'
 import { formatDuration } from '@/lib/format'
 import { cn } from '@/lib/cn'
-import type { Movie } from '@/types/api'
+import type { AudioTrack, Movie } from '@/types/api'
 
 interface StepMovieProps {
   selectedId: number
+  audioTrack: number | string | null
   onSelect: (id: number) => void
+  onAudioTrack: (track: number | null) => void
 }
 
-export function StepMovie({ selectedId, onSelect }: StepMovieProps) {
+export function StepMovie({ selectedId, audioTrack, onSelect, onAudioTrack }: StepMovieProps) {
   const movies = useMovies()
   const [q, setQ] = useState('')
+  const selected = movies.data?.find((m) => m.id === selectedId)
 
   return (
     <div className="space-y-4">
@@ -54,6 +57,8 @@ export function StepMovie({ selectedId, onSelect }: StepMovieProps) {
       >
         {(data) => <MovieGrid movies={data} q={q} selectedId={selectedId} onSelect={onSelect} />}
       </QueryBoundary>
+
+      {selected && <AudioTrackField movie={selected} value={audioTrack} onChange={onAudioTrack} />}
     </div>
   )
 }
@@ -132,5 +137,74 @@ function MovieGrid({
         )
       })}
     </div>
+  )
+}
+
+function channelLabel(ch: number): string {
+  if (ch === 1) return 'моно'
+  if (ch === 2) return 'стерео'
+  if (ch === 6) return '5.1'
+  if (ch === 8) return '7.1'
+  return `${ch} кан.`
+}
+
+function trackLabel(t: AudioTrack): string {
+  const parts: string[] = [`#${t.index}`]
+  if (t.language) parts.push(t.language.toUpperCase())
+  if (t.title) parts.push(t.title)
+  if (t.channels != null) parts.push(channelLabel(t.channels))
+  if (t.codec) parts.push(t.codec)
+  if (t.default) parts.push('по умолчанию')
+  return parts.join(' · ')
+}
+
+function AudioTrackField({
+  movie,
+  value,
+  onChange,
+}: {
+  movie: Movie
+  value: number | string | null
+  onChange: (track: number | null) => void
+}) {
+  const tracks = movie.audio_tracks ?? []
+  const valueStr = value == null ? '' : String(value)
+  // Значение из профиля/повтора может не совпасть с дорожками этого фильма —
+  // показываем синтетический пункт, чтобы селект не «молчал» (display = state).
+  const matched = value == null || tracks.some((t) => String(t.index) === valueStr)
+  return (
+    <Field
+      label="Звуковая дорожка"
+      hint={
+        tracks.length > 0
+          ? 'Какую дорожку транскрибировать и брать в шортсы.'
+          : 'Дорожки не определены — будет выбрана автоматически.'
+      }
+    >
+      <Select
+        value={valueStr}
+        disabled={tracks.length === 0 && value == null}
+        onChange={(e) => {
+          const v = e.target.value
+          if (v === '') return onChange(null)
+          const n = Number(v)
+          onChange(Number.isNaN(n) ? null : n)
+        }}
+      >
+        <option value="">Авто (по языку)</option>
+        {!matched && (
+          <option value={valueStr}>
+            {typeof value === 'number'
+              ? `Дорожка #${value} (нет в этом фильме)`
+              : `Язык: ${valueStr}`}
+          </option>
+        )}
+        {tracks.map((t) => (
+          <option key={t.index} value={t.index}>
+            {trackLabel(t)}
+          </option>
+        ))}
+      </Select>
+    </Field>
   )
 }

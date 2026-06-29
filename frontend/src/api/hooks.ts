@@ -87,6 +87,35 @@ export function useBatchJobs() {
     onSuccess: () => invalidateJobs(qc),
   })
 }
+export function useDeleteJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, deleteShorts }: { id: number; deleteShorts?: boolean }) =>
+      api.deleteJob(id, deleteShorts ?? false),
+    onSuccess: () => {
+      invalidateJobs(qc)
+      qc.invalidateQueries({ queryKey: ['shorts'] })
+    },
+  })
+}
+export function useBulkJobs() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      ids,
+      action,
+      deleteShorts,
+    }: {
+      ids: number[]
+      action: 'delete' | 'cancel'
+      deleteShorts?: boolean
+    }) => api.bulkJobs(ids, action, deleteShorts ?? false),
+    onSuccess: () => {
+      invalidateJobs(qc)
+      qc.invalidateQueries({ queryKey: ['shorts'] })
+    },
+  })
+}
 
 // ─── Шортсы ─────────────────────────────────────────────────────────────────
 export const useShorts = (filter?: ShortsFilter) =>

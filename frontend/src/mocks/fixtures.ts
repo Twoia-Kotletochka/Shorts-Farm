@@ -53,6 +53,10 @@ export const movies: Movie[] = [
     file_size: 14_800_000_000,
     status: 'new',
     transcription_status: 'done',
+    audio_tracks: [
+      { index: 0, language: 'eng', title: 'Original', channels: 6, codec: 'ac3', default: true },
+      { index: 1, language: 'rus', title: 'Дубляж', channels: 2, codec: 'aac', default: false },
+    ],
     added_at: ago(60 * 26),
   },
   {
@@ -69,6 +73,11 @@ export const movies: Movie[] = [
     file_size: 38_200_000_000,
     status: 'new',
     transcription_status: 'done',
+    audio_tracks: [
+      { index: 0, language: 'eng', title: 'Original', channels: 8, codec: 'dts', default: true },
+      { index: 1, language: 'rus', title: 'Дубляж', channels: 6, codec: 'ac3', default: false },
+      { index: 2, language: 'eng', title: 'Комментарии', channels: 2, codec: 'aac', default: false },
+    ],
     added_at: ago(60 * 20),
   },
   {
@@ -85,6 +94,9 @@ export const movies: Movie[] = [
     file_size: 3_100_000_000,
     status: 'new',
     transcription_status: 'none',
+    audio_tracks: [
+      { index: 0, language: 'rus', title: null, channels: 2, codec: 'aac', default: true },
+    ],
     added_at: ago(60 * 5),
   },
   {
@@ -117,6 +129,7 @@ export const movies: Movie[] = [
     file_size: 12_400_000_000,
     status: 'error',
     transcription_status: 'error',
+    audio_tracks: [],
     added_at: ago(60 * 48),
   },
 ]
@@ -211,6 +224,8 @@ export const settings: Settings = {
     api_key: 'gsk_demo_1234567890abcdef',
     model: 'llama-3.3-70b-versatile',
     model_fast: 'llama-3.1-8b-instant',
+    models: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct'],
+    models_fast: ['llama-3.1-8b-instant'],
   },
   stt_provider: {
     type: 'groq',
@@ -317,7 +332,7 @@ export const shorts: MockShort[] = [
     status: 'draft',
     category: 'Эмоциональные сцены',
     hook_title: '«Не уходи смиренно…»',
-    rating: ratingOf(0.92, 0.94, 0.97, 0.7, 0.88),
+    rating: ratingOf(92, 94, 97, 70, 88),
     reason: 'Сильный эмоциональный пик с узнаваемой цитатой и крупным планом — высокий потенциал удержания.',
     duration: 28,
     start_ts: 3540,
@@ -346,7 +361,7 @@ export const shorts: MockShort[] = [
     status: 'draft',
     category: '«Вау»-моменты',
     hook_title: 'Волна высотой с гору',
-    rating: ratingOf(0.86, 0.8, 0.72, 0.95, 0.84),
+    rating: ratingOf(86, 80, 72, 95, 84),
     reason: 'Визуально эффектный момент с нарастающим напряжением — хорошо заходит без контекста.',
     duration: 22,
     start_ts: 4980,
@@ -372,7 +387,7 @@ export const shorts: MockShort[] = [
     status: 'approved',
     category: 'Сюжетные твисты',
     hook_title: 'Волчок всё ещё крутится',
-    rating: ratingOf(0.9, 0.88, 0.66, 0.74, 0.93),
+    rating: ratingOf(90, 88, 66, 74, 93),
     reason: 'Культовая концовка-загадка — провоцирует обсуждение и репосты.',
     duration: 19,
     start_ts: 8740,
@@ -398,7 +413,7 @@ export const shorts: MockShort[] = [
     status: 'rejected',
     category: 'Напряжение / саспенс',
     hook_title: 'Коридор без гравитации',
-    rating: ratingOf(0.71, 0.69, 0.6, 0.9, 0.65),
+    rating: ratingOf(71, 69, 60, 90, 65),
     reason: 'Динамичная сцена, но без яркого хука в первые секунды.',
     duration: 31,
     start_ts: 5210,

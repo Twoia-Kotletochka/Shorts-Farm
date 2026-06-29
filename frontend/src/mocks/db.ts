@@ -57,8 +57,8 @@ function makeDraft(job: Job, idx: number, params: JobParams): MockShort {
   const [dmin, dmax] = params.target_duration_sec
   const dur = Math.round(dmin + Math.random() * Math.max(1, dmax - dmin))
   const start = Math.round(300 + Math.random() * 6000)
-  const r = () => 0.55 + Math.random() * 0.4
-  const overall = Number(r().toFixed(2))
+  const r = () => Math.round(55 + Math.random() * 40) // шкала 0..100
+  const overall = r()
   shortSeq += 1
   momentSeq += 1
   return {
@@ -73,10 +73,10 @@ function makeDraft(job: Job, idx: number, params: JobParams): MockShort {
     hook_title: `Момент ${idx + 1}: ${cat ?? 'сцена'}`,
     rating: {
       overall,
-      retention: Number(r().toFixed(2)),
-      emotion: Number(r().toFixed(2)),
-      dynamics: Number(r().toFixed(2)),
-      virality: Number(r().toFixed(2)),
+      retention: r(),
+      emotion: r(),
+      dynamics: r(),
+      virality: r(),
     },
     reason: 'Кандидат отобран по тексту, аудио-энергии и сцене — высокий совокупный балл.',
     duration: dur,

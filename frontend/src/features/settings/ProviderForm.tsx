@@ -18,6 +18,7 @@ import { apiErrorMessage } from '@/api/http'
 import { PROVIDER_PRESETS, PROVIDER_TYPE_LABELS } from '@/lib/labels'
 import { PROVIDER_TYPES } from '@/types/api'
 import type { ProviderConfig, ProviderType } from '@/types/api'
+import { ModelListEditor } from './ModelListEditor'
 
 /** Эвристика: ключ пришёл замаскированным с бэкенда (звёздочки) — не перезатираем. */
 const MASKED_RE = /\*{2,}/
@@ -39,8 +40,13 @@ export function ProviderForm({ kind, title, icon: Icon, initial }: ProviderFormP
   const [type, setType] = useState<ProviderType>(initial.type)
   const [baseUrl, setBaseUrl] = useState(initial.base_url ?? '')
   const [apiKey, setApiKey] = useState(initial.api_key ?? '')
-  const [model, setModel] = useState(initial.model)
-  const [modelFast, setModelFast] = useState(initial.model_fast ?? '')
+  const [model, setModel] = useState(initial.model) // одиночная модель (STT)
+  const [models, setModels] = useState<string[]>(
+    initial.models ?? (initial.model ? [initial.model] : []),
+  )
+  const [modelsFast, setModelsFast] = useState<string[]>(
+    initial.models_fast ?? (initial.model_fast ? [initial.model_fast] : []),
+  )
   // Был ли ключ отредактирован пользователем (иначе шлём как пришёл — маску).
   const [keyTouched, setKeyTouched] = useState(false)
 
@@ -50,36 +56,49 @@ export function ProviderForm({ kind, title, icon: Icon, initial }: ProviderFormP
     setBaseUrl(initial.base_url ?? '')
     setApiKey(initial.api_key ?? '')
     setModel(initial.model)
-    setModelFast(initial.model_fast ?? '')
+    setModels(initial.models ?? (initial.model ? [initial.model] : []))
+    setModelsFast(initial.models_fast ?? (initial.model_fast ? [initial.model_fast] : []))
     setKeyTouched(false)
   }, [initial])
 
   const preset = PROVIDER_PRESETS[type]
-  const modelList = isLlm ? preset.llm_models : preset.stt_models
   const needsKey = preset.needs_key
-  const sttUnsupported = !isLlm && modelList.length === 0
+  const sttUnsupported = !isLlm && preset.stt_models.length === 0
   const incomingMasked = MASKED_RE.test(initial.api_key ?? '')
 
   function applyType(next: ProviderType) {
     setType(next)
     const p = PROVIDER_PRESETS[next]
     setBaseUrl(p.base_url)
-    const list = isLlm ? p.llm_models : p.stt_models
-    setModel(list[0] ?? '')
-    if (isLlm) setModelFast(p.llm_models[1] ?? p.llm_models[0] ?? '')
+    if (isLlm) {
+      setModels(p.llm_models)
+      setModelsFast(p.llm_models_fast)
+    } else {
+      setModel(p.stt_models[0] ?? '')
+    }
   }
 
   function buildConfig(): ProviderConfig {
     // Если ключ не трогали и он пришёл замаскированным — отдаём как есть (бэкенд сохранит старый).
     const key = !keyTouched && incomingMasked ? (initial.api_key ?? '') : apiKey
-    const cfg: ProviderConfig = {
+    const apiKeyOut = key.trim() ? key : null
+    if (isLlm) {
+      return {
+        type,
+        base_url: baseUrl.trim() || null,
+        api_key: apiKeyOut,
+        model: models[0] ?? model.trim(), // одиночная модель = первая из списка (fallback бэкенда)
+        model_fast: modelsFast[0] ?? null,
+        models,
+        models_fast: modelsFast,
+      }
+    }
+    return {
       type,
       base_url: baseUrl.trim() || null,
-      api_key: key.trim() ? key : null,
+      api_key: apiKeyOut,
       model: model.trim(),
     }
-    if (isLlm) cfg.model_fast = modelFast.trim() || null
-    return cfg
   }
 
   function handleTest() {
@@ -172,13 +191,29 @@ export function ProviderForm({ kind, title, icon: Icon, initial }: ProviderFormP
           />
         </Field>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {isLlm ? (
+          <div className="space-y-4">
+            <ModelListEditor
+              label="Модели (по приоритету)"
+              hint="Перебор сверху вниз: при лимите/кредитах/ошибке провайдера (402/403/429) — следующая. Первая — основная."
+              value={models}
+              onChange={setModels}
+              suggestions={preset.llm_models}
+            />
+            <ModelListEditor
+              label="Быстрые модели (по приоритету)"
+              hint="Дешёвый первый проход. Пусто — используется основная модель."
+              value={modelsFast}
+              onChange={setModelsFast}
+              suggestions={preset.llm_models_fast}
+            />
+          </div>
+        ) : (
           <Field label="Модель">
-            {modelList.length > 0 ? (
+            {preset.stt_models.length > 0 ? (
               <Select value={model} onChange={(e) => setModel(e.target.value)}>
-                {/* Сохраняем кастомную модель, если её нет в пресете. */}
-                {!modelList.includes(model) && model && <option value={model}>{model}</option>}
-                {modelList.map((m) => (
+                {!preset.stt_models.includes(model) && model && <option value={model}>{model}</option>}
+                {preset.stt_models.map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>
@@ -192,16 +227,7 @@ export function ProviderForm({ kind, title, icon: Icon, initial }: ProviderFormP
               />
             )}
           </Field>
-          {isLlm && (
-            <Field label="Быстрая модель" hint="Для дешёвого первого прохода (опционально)">
-              <Input
-                value={modelFast}
-                onChange={(e) => setModelFast(e.target.value)}
-                placeholder="llama-3.1-8b-instant"
-              />
-            </Field>
-          )}
-        </div>
+        )}
 
         {preset.note && (
           <p className="text-xs text-content-faint">{preset.note}</p>

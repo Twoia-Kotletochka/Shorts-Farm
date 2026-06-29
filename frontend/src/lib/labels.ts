@@ -134,7 +134,10 @@ export interface ProviderPreset {
   label: string
   base_url: string
   needs_key: boolean
+  /** Сильные модели по приоритету (2-й проход/метаданные) — дефолт для списка models. */
   llm_models: string[]
+  /** Быстрые модели по приоритету (1-й проход) — дефолт для списка models_fast. */
+  llm_models_fast: string[]
   stt_models: string[]
   note?: string
 }
@@ -144,11 +147,8 @@ export const PROVIDER_PRESETS: Record<ProviderType, ProviderPreset> = {
     label: 'Groq',
     base_url: 'https://api.groq.com/openai/v1',
     needs_key: true,
-    llm_models: [
-      'llama-3.3-70b-versatile',
-      'meta-llama/llama-4-scout-17b-16e-instruct',
-      'llama-3.1-8b-instant',
-    ],
+    llm_models: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct'],
+    llm_models_fast: ['llama-3.1-8b-instant'],
     stt_models: ['whisper-large-v3-turbo', 'whisper-large-v3'],
     note: 'Бесплатный tier с жёсткими квотами (лимиты считаются на дашборде).',
   },
@@ -158,6 +158,7 @@ export const PROVIDER_PRESETS: Record<ProviderType, ProviderPreset> = {
     base_url: 'https://openrouter.ai/api/v1',
     needs_key: true,
     llm_models: ['meta-llama/llama-3.3-70b-instruct', 'openai/gpt-4o-mini'],
+    llm_models_fast: ['meta-llama/llama-3.1-8b-instruct'],
     stt_models: [],
     note: 'Только LLM. Для STT используйте Groq/OpenAI или свой Whisper-сервер.',
   },
@@ -166,7 +167,8 @@ export const PROVIDER_PRESETS: Record<ProviderType, ProviderPreset> = {
     label: 'Ollama Cloud',
     base_url: 'https://ollama.com/v1',
     needs_key: true,
-    llm_models: ['gpt-oss:120b', 'gpt-oss:20b', 'deepseek-v3.1:671b', 'qwen3-coder:480b'],
+    llm_models: ['gpt-oss:120b', 'gemma3:27b', 'gpt-oss:20b'],
+    llm_models_fast: ['gpt-oss:20b', 'gemma3:12b', 'ministral-3:8b'],
     stt_models: [],
     note: 'Ollama Cloud (ollama.com) — нужен API-ключ. Только LLM.',
   },
@@ -175,7 +177,8 @@ export const PROVIDER_PRESETS: Record<ProviderType, ProviderPreset> = {
     label: 'OpenAI',
     base_url: 'https://api.openai.com/v1',
     needs_key: true,
-    llm_models: ['gpt-4o-mini', 'gpt-4o'],
+    llm_models: ['gpt-4o'],
+    llm_models_fast: ['gpt-4o-mini'],
     stt_models: ['whisper-1'],
   },
 }

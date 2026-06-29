@@ -1,15 +1,15 @@
 import { Star } from 'lucide-react'
 import { Progress } from '@/components/ui'
 import { RATING_CRITERIA } from '@/lib/labels'
-import { formatPct, ratingTo100 } from '@/lib/format'
+import { ratingFraction, ratingTo100 } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { ShortRating } from '@/types/api'
 
-/** Тон полоски/балла по значению 0..1. */
+/** Тон полоски/балла по значению 0..100. */
 function toneFor(v: number): 'success' | 'primary' | 'warning' | 'danger' {
-  if (v >= 0.8) return 'success'
-  if (v >= 0.6) return 'primary'
-  if (v >= 0.4) return 'warning'
+  if (v >= 80) return 'success'
+  if (v >= 60) return 'primary'
+  if (v >= 40) return 'warning'
   return 'danger'
 }
 
@@ -44,9 +44,9 @@ export function RatingBars({ rating, reason }: { rating: ShortRating; reason?: s
             <li key={key} className="space-y-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-content-muted">{label}</span>
-                <span className="font-medium text-content">{formatPct(v)}</span>
+                <span className="font-medium text-content">{Math.round(v)}</span>
               </div>
-              <Progress value={v} tone={toneFor(v)} />
+              <Progress value={ratingFraction(v)} tone={toneFor(v)} />
             </li>
           )
         })}

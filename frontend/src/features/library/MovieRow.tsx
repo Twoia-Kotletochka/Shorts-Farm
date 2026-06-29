@@ -5,7 +5,7 @@ import { Badge, Button, Card, Modal, toast, Tooltip } from '@/components/ui'
 import { TranscriptionBadge } from '@/components/common/badges'
 import { useDeleteMovie } from '@/api/hooks'
 import { apiErrorMessage } from '@/api/http'
-import { formatBytes, formatDuration } from '@/lib/format'
+import { formatBytes, formatDuration, plural } from '@/lib/format'
 import type { Movie } from '@/types/api'
 
 export function MovieRow({ movie }: { movie: Movie }) {
@@ -27,6 +27,7 @@ export function MovieRow({ movie }: { movie: Movie }) {
   if (movie.width != null && movie.height != null) meta.push(`${movie.width}×${movie.height}`)
   if (movie.fps != null) meta.push(`${Math.round(movie.fps)} fps`)
   if (movie.file_size != null) meta.push(formatBytes(movie.file_size))
+  const tracks = movie.audio_tracks ?? []
 
   return (
     <Card className="group flex items-center gap-4 p-3 transition-colors hover:border-border-strong">
@@ -56,6 +57,11 @@ export function MovieRow({ movie }: { movie: Movie }) {
       {/* Статусы */}
       <div className="flex shrink-0 items-center gap-2">
         {movie.status === 'error' && <Badge tone="danger">Ошибка</Badge>}
+        {tracks.length > 1 && (
+          <Badge tone="neutral">
+            {tracks.length} {plural(tracks.length, 'дорожка', 'дорожки', 'дорожек')}
+          </Badge>
+        )}
         <TranscriptionBadge status={movie.transcription_status} />
       </div>
 

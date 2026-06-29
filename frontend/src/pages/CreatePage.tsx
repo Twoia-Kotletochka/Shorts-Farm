@@ -173,7 +173,12 @@ export function CreatePage() {
           <CardHeader title={step.title} description={step.subtitle} />
           <CardContent className="pt-0">
             {currentId === 'movie' && (
-              <StepMovie selectedId={params.movie_id} onSelect={(id) => patch({ movie_id: id })} />
+              <StepMovie
+                selectedId={params.movie_id}
+                audioTrack={params.audio_track ?? null}
+                onSelect={(id) => patch({ movie_id: id, audio_track: null })}
+                onAudioTrack={(audio_track) => patch({ audio_track })}
+              />
             )}
             {currentId === 'categories' && (
               <StepCategories

@@ -94,8 +94,14 @@ export function formatPct(v: number | null | undefined, digits = 0): string {
   return `${(v * 100).toFixed(digits)}%`
 }
 
-/** Рейтинг 0..1 → целое 0..100 для крупного балла. */
+/** Рейтинг бэкенда (шкала 0..100) → округлённое целое для крупного балла. */
 export function ratingTo100(v: number | null | undefined): number {
   if (v == null || !isFinite(v)) return 0
-  return Math.round(Math.max(0, Math.min(1, v)) * 100)
+  return Math.round(Math.max(0, Math.min(100, v)))
+}
+
+/** Доля 0..1 из рейтинга 0..100 — для ширины полоски Progress. */
+export function ratingFraction(v: number | null | undefined): number {
+  if (v == null || !isFinite(v)) return 0
+  return Math.max(0, Math.min(100, v)) / 100
 }

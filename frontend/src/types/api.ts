@@ -52,6 +52,16 @@ export const SUBTITLE_POSITIONS = ['top', 'center', 'bottom'] as const
 export type SubtitlePosition = (typeof SUBTITLE_POSITIONS)[number]
 
 // ─── Библиотека / фильмы ────────────────────────────────────────────────────
+export interface AudioTrack {
+  index: number // относительный индекс среди аудио (для -map 0:a:N)
+  stream_index?: number | null
+  language: string | null
+  title: string | null
+  channels: number | null
+  codec: string | null
+  default: boolean
+}
+
 export interface Movie {
   id: number
   title: string
@@ -64,8 +74,9 @@ export interface Movie {
   height: number | null
   fps: number | null
   file_size?: number | null // байты
-  status: MovieStatus
+  status?: MovieStatus // в списке (MovieOut) не приходит — только в деталях
   transcription_status: TranscriptionStatus
+  audio_tracks?: AudioTrack[]
   added_at: string // ISO datetime
   metadata?: Record<string, unknown>
 }
@@ -103,6 +114,7 @@ export interface JobParams {
   reframe: ReframeMode
   target_duration_sec: [number, number]
   language: string
+  audio_track?: number | string | null // index дорожки ИЛИ код языка ("rus"); null/опустить → авто
   allow_duplicates?: boolean
   profile_id?: number | null
   priority?: number
@@ -231,9 +243,12 @@ export type CategoryInput = Omit<Category, 'id'>
 export interface ProviderConfig {
   type: ProviderType
   base_url?: string | null
-  api_key?: string | null // в ответах GET маскируется
+  api_key?: string | null // в ответах GET маскируется ("****abcd")
   model: string
   model_fast?: string | null // только LLM (двухпроходный анализ)
+  // Балансир: упорядоченные списки моделей (failover на 402/403/429). Пусто → одиночные model/model_fast.
+  models?: string[] | null
+  models_fast?: string[] | null
 }
 
 export interface RenderSettings {
@@ -318,5 +333,5 @@ export interface BackupResult {
   file: string
 }
 
-/** Шкала рейтинга на проводе: 0..1 (предположение; уточнить с бэкендом). */
-export const RATING_SCALE = 1
+/** Шкала рейтинга на проводе: 0..100 (подтверждено бэкендом — pipeline/select). */
+export const RATING_SCALE = 100

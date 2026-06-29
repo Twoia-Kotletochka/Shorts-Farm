@@ -51,6 +51,20 @@ export const estimateJob = (body: JobParams) =>
   http.post<JobEstimate>('/jobs/estimate', body).then((r) => r.data)
 export const batchJobs = (body: Record<string, unknown>) =>
   http.post<{ job_ids: number[] }>('/jobs/batch', body).then((r) => r.data)
+export const deleteJob = (id: number, deleteShorts = false) =>
+  http
+    .delete<{ ok: boolean; deleted_shorts: number }>(`/jobs/${id}`, {
+      params: { delete_shorts: deleteShorts },
+    })
+    .then((r) => r.data)
+export const bulkJobs = (ids: number[], action: 'delete' | 'cancel', deleteShorts = false) =>
+  http
+    .post<{ ok: boolean; affected: number }>('/jobs/bulk', {
+      ids,
+      action,
+      delete_shorts: deleteShorts,
+    })
+    .then((r) => r.data)
 
 // ─── Шортсы ─────────────────────────────────────────────────────────────────
 export const getShorts = (filter?: ShortsFilter) =>

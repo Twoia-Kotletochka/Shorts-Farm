@@ -22,6 +22,7 @@ import type { ShortsFilter } from '@/api/keys'
 import { apiErrorMessage } from '@/api/http'
 import {
   Button,
+  Checkbox,
   Select,
   Tabs,
   Skeleton,
@@ -121,6 +122,20 @@ export function ShortsPage() {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
+      return next
+    })
+  }
+
+  // Выбрать все видимые на странице.
+  const visibleIds = items.map((s) => s.id)
+  const selectedVisible = visibleIds.filter((id) => selected.has(id)).length
+  const allSelected = visibleIds.length > 0 && selectedVisible === visibleIds.length
+  const someSelected = selectedVisible > 0 && !allSelected
+  function toggleSelectAll(checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (checked) visibleIds.forEach((id) => next.add(id))
+      else visibleIds.forEach((id) => next.delete(id))
       return next
     })
   }
@@ -260,6 +275,21 @@ export function ShortsPage() {
           </div>
         </div>
       </div>
+
+      {/* Выбрать все на странице */}
+      {items.length > 0 && (
+        <div className="flex items-center gap-3">
+          <Checkbox
+            checked={allSelected}
+            indeterminate={someSelected}
+            onChange={toggleSelectAll}
+            label={`Выбрать все на странице (${items.length})`}
+          />
+          {selected.size > 0 && (
+            <span className="text-sm text-content-faint">выбрано: {selected.size}</span>
+          )}
+        </div>
+      )}
 
       {/* Сетка */}
       <QueryBoundary

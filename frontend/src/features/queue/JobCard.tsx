@@ -5,19 +5,21 @@ import {
   ChevronUp,
   Clock,
   RotateCcw,
+  Trash2,
   X,
 } from 'lucide-react'
 import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   Modal,
   Progress,
   toast,
   Tooltip,
 } from '@/components/ui'
 import { JobStatusBadge } from '@/components/common/badges'
-import { useCancelJob, useRepeatJob, useSetJobPriority } from '@/api/hooks'
+import { useCancelJob, useDeleteJob, useRepeatJob, useSetJobPriority } from '@/api/hooks'
 import { apiErrorMessage } from '@/api/http'
 import { formatDateTime, formatRelative } from '@/lib/format'
 import type { Job } from '@/types/api'
@@ -31,11 +33,21 @@ function progressTone(status: Job['status']): 'primary' | 'warning' | 'danger' {
   return 'primary'
 }
 
-export function JobCard({ job }: { job: Job }) {
+interface JobCardProps {
+  job: Job
+  selected?: boolean
+  onToggleSelect?: () => void
+  shortsCount?: number
+}
+
+export function JobCard({ job, selected, onToggleSelect, shortsCount = 0 }: JobCardProps) {
   const cancel = useCancelJob()
   const repeat = useRepeatJob()
   const setPriority = useSetJobPriority()
+  const del = useDeleteJob()
   const [confirmCancel, setConfirmCancel] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [delShorts, setDelShorts] = useState(false)
 
   const isActive = (ACTIVE_STATUSES as readonly string[]).includes(job.status)
   const canCancel = isActive
@@ -60,6 +72,22 @@ export function JobCard({ job }: { job: Job }) {
     })
   }
 
+  const onDelete = () => {
+    del.mutate(
+      { id: job.id, deleteShorts: delShorts },
+      {
+        onSuccess: (res) => {
+          toast.success(
+            'Задача удалена',
+            res.deleted_shorts > 0 ? `Удалено роликов: ${res.deleted_shorts}` : undefined,
+          )
+          setConfirmDelete(false)
+        },
+        onError: (err) => toast.error(apiErrorMessage(err)),
+      },
+    )
+  }
+
   const changePriority = (next: number) => {
     const clamped = Math.max(0, Math.min(9, next))
     if (clamped === job.priority) return
@@ -80,14 +108,23 @@ export function JobCard({ job }: { job: Job }) {
       <CardContent className="space-y-4">
         {/* Шапка */}
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <p className="truncate text-sm font-semibold text-content">{title}</p>
-            <p className="text-xs text-content-faint">
-              Задача #{job.id} ·{' '}
-              <Tooltip content={formatDateTime(job.created_at)}>
-                <span>{formatRelative(job.created_at)}</span>
-              </Tooltip>
-            </p>
+          <div className="flex min-w-0 items-start gap-2.5">
+            {onToggleSelect && (
+              <Checkbox
+                checked={!!selected}
+                onChange={() => onToggleSelect()}
+                className="mt-0.5"
+              />
+            )}
+            <div className="min-w-0 space-y-1">
+              <p className="truncate text-sm font-semibold text-content">{title}</p>
+              <p className="text-xs text-content-faint">
+                Задача #{job.id} ·{' '}
+                <Tooltip content={formatDateTime(job.created_at)}>
+                  <span>{formatRelative(job.created_at)}</span>
+                </Tooltip>
+              </p>
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <PriorityControl
@@ -164,6 +201,18 @@ export function JobCard({ job }: { job: Job }) {
               Отменить
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={<Trash2 className="h-4 w-4" />}
+            className="text-content-muted hover:text-danger"
+            onClick={() => {
+              setDelShorts(false)
+              setConfirmDelete(true)
+            }}
+          >
+            Удалить
+          </Button>
         </div>
       </CardContent>
 
@@ -185,6 +234,37 @@ export function JobCard({ job }: { job: Job }) {
         }
       >
         <p className="text-sm text-content-muted">Это действие нельзя отменить.</p>
+      </Modal>
+
+      <Modal
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title="Удалить задачу?"
+        description={`«${title}» (#${job.id}) будет полностью убрана из очереди.`}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
+              Назад
+            </Button>
+            <Button variant="danger" loading={del.isPending} onClick={onDelete}>
+              Удалить
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm text-content-muted">
+          {isActive && <p>Активная задача будет сначала отменена.</p>}
+          {shortsCount > 0 ? (
+            <Checkbox
+              checked={delShorts}
+              onChange={setDelShorts}
+              label={`Также удалить готовые ролики этой задачи (${shortsCount}) вместе с файлами`}
+            />
+          ) : (
+            <p>Готовые ролики этой задачи не затрагиваются (останутся в «Готовых»).</p>
+          )}
+        </div>
       </Modal>
     </Card>
   )

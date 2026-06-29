@@ -12,7 +12,7 @@ function thumbSvg(id: number): string {
   const hue = (id * 47) % 360
   const title = (short?.hook_title ?? 'Превью').slice(0, 40)
   const cat = short?.category ?? ''
-  const score = short ? Math.round(short.rating.overall * 100) : 0
+  const score = short ? Math.round(short.rating.overall) : 0
   return `<svg xmlns="http://www.w3.org/2000/svg" width="270" height="480" viewBox="0 0 270 480">
   <defs>
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
