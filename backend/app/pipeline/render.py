@@ -82,8 +82,10 @@ def _ass_escape(path: str) -> str:
 
 
 def _build_filter_complex(
-    opts: RenderOptions, w: int, h: int, crop_cx: float | None, ass_path: str | None, vaapi: bool, draft: bool
+    opts: RenderOptions, w: int, h: int, crop_cx: float | None, ass_path: str | None,
+    vaapi: bool, draft: bool, audio_index: int | None,
 ) -> tuple[str, str]:
+    ai = audio_index if audio_index is not None else 0
     if opts.reframe == "blurpad":
         chain = (
             f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,boxblur=20:5,crop={w}:{h}[bg];"
@@ -108,10 +110,11 @@ def _build_filter_complex(
     post.append("format=nv12,hwupload" if vaapi else "format=yuv420p")
     video = f"{chain};[v]{','.join(post)}[vout]"
 
+    # маппим ОДНУ выбранную дорожку (а не все), иначе в ролик попадают все дорожки источника
     if opts.loudnorm and not draft:
-        audio = "[0:a]loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
+        audio = f"[0:a:{ai}]loudnorm=I=-14:TP=-1.5:LRA=11[aout]"
         return f"{video};{audio}", "[aout]"
-    return video, "0:a?"
+    return video, f"0:a:{ai}?"
 
 
 def _encoder_order(opts: RenderOptions, draft: bool) -> list[str]:
@@ -134,6 +137,7 @@ def render_clip(
     draft: bool = False,
     crop_cx: float | None = None,
     ass_path: str | None = None,
+    audio_index: int | None = None,
 ) -> str:
     """Отрендерить один клип. Возвращает использованный энкодер. Откат VAAPI→libx264."""
     dur = max(0.1, end - start)
@@ -143,13 +147,14 @@ def render_clip(
     last_err: Exception | None = None
     for enc in _encoder_order(opts, draft):
         vaapi = enc == "vaapi"
-        fc, amap = _build_filter_complex(opts, w, h, crop_cx, ass_path, vaapi, draft)
+        fc, amap = _build_filter_complex(opts, w, h, crop_cx, ass_path, vaapi, draft, audio_index)
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
         if vaapi:
             cmd += ["-vaapi_device", VAAPI_DEVICE]
         # input-seek: -ss ДО -i, не декодируем весь фильм ради куска
         cmd += ["-ss", f"{start:.3f}", "-i", source, "-t", f"{dur:.3f}",
-                "-filter_complex", fc, "-map", "[vout]", "-map", amap]
+                "-filter_complex", fc, "-map", "[vout]", "-map", amap,
+                "-dn", "-map_metadata", "-1", "-map_chapters", "-1"]  # без data/мусорных метаданных источника
         if vaapi:
             cmd += ["-c:v", "h264_vaapi", "-b:v", "6M"]
         else:

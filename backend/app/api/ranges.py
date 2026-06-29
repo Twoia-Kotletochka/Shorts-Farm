@@ -6,6 +6,7 @@ Range сам, поэтому реализуем 206 Partial Content вручну
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
@@ -63,9 +64,12 @@ def serve_file(
     file_size = path.stat().st_size
     disposition = "attachment" if as_attachment else "inline"
     name = download_name or path.name
+    # Content-Disposition должен быть latin-1; кириллицу отдаём по RFC 5987 (filename*) + ASCII-фолбэк.
+    ascii_name = name.encode("ascii", "ignore").decode().strip() or "file"
+    content_disposition = f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
     base_headers = {
         "accept-ranges": "bytes",
-        "content-disposition": f'{disposition}; filename="{name}"',
+        "content-disposition": content_disposition,
     }
 
     range_header = request.headers.get("range")

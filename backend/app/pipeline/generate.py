@@ -228,13 +228,13 @@ def run_generation(job_id: int) -> None:
         _stage(db, job, JobStage.PREVIEW, 0.8)
         opts = _render_opts(params, render_settings)
         if fmt == "compilation":
-            _make_compilation_draft(db, job, movie, chosen, transcript, opts, source)
+            _make_compilation_draft(db, job, movie, chosen, transcript, opts, source, audio_index)
         else:
             for i, cand in enumerate(chosen):
                 if _is_canceled(db, job_id):
                     return
                 ensure_disk()
-                _make_draft_short(db, job, movie, cand, transcript, opts, source)
+                _make_draft_short(db, job, movie, cand, transcript, opts, source, audio_index)
                 job.progress = round(0.8 + 0.18 * (i + 1) / len(chosen), 3)
                 db.commit()
 
@@ -265,12 +265,12 @@ def _fail(db, job_id: int, error: str) -> None:
         db.commit()
 
 
-def _make_draft_short(db, job: Job, movie: Movie, cand, transcript: Transcript, opts: RenderOptions, source: str) -> Short:
+def _make_draft_short(db, job: Job, movie: Movie, cand, transcript: Transcript, opts: RenderOptions, source: str, audio_index: int | None) -> Short:
     cues = slice_cues(transcript, cand.start, cand.end)
     base = clip_basename(movie, cand.start, cand.end, cand.category)
     out = movie_subdir(movie) / f"{base}.preview.mp4"
     crop = face_center_norm(source, cand.start, cand.end) if opts.reframe == "smartcrop" else None
-    render_clip(source, cand.start, cand.end, str(out), opts, draft=True, crop_cx=crop)
+    render_clip(source, cand.start, cand.end, str(out), opts, draft=True, crop_cx=crop, audio_index=audio_index)
 
     short = Short(
         job_id=job.id, movie_id=movie.id, moment_id=cand.moment_id, variant_no=1,
@@ -283,7 +283,7 @@ def _make_draft_short(db, job: Job, movie: Movie, cand, transcript: Transcript, 
     return short
 
 
-def _make_compilation_draft(db, job: Job, movie: Movie, chosen, transcript: Transcript, opts: RenderOptions, source: str) -> Short:
+def _make_compilation_draft(db, job: Job, movie: Movie, chosen, transcript: Transcript, opts: RenderOptions, source: str, audio_index: int | None) -> Short:
     workdir = movie_subdir(movie) / f"job{job.id}_tmp"
     segs: list[str] = []
     soft: list[dict] = []
@@ -291,7 +291,7 @@ def _make_compilation_draft(db, job: Job, movie: Movie, chosen, transcript: Tran
     for i, cand in enumerate(chosen):
         seg = workdir / f"seg{i:03d}.mp4"
         crop = face_center_norm(source, cand.start, cand.end) if opts.reframe == "smartcrop" else None
-        render_clip(source, cand.start, cand.end, str(seg), opts, draft=True, crop_cx=crop)
+        render_clip(source, cand.start, cand.end, str(seg), opts, draft=True, crop_cx=crop, audio_index=audio_index)
         segs.append(str(seg))
         for cue in slice_cues(transcript, cand.start, cand.end):
             soft.append({"start": cue["start"] + offset, "end": cue["end"] + offset, "text": cue["text"]})
@@ -350,7 +350,12 @@ def run_final_render(short_id: int) -> None:
         base = clip_basename(movie, start, end, short.category)
         out = movie_subdir(movie) / f"{base}.mp4"
         crop = face_center_norm(source, start, end) if opts.reframe == "smartcrop" else None
-        render_clip(source, start, end, str(out), opts, draft=False, crop_cx=crop, ass_path=ass_path)
+        lang_pref = params.get("language") or ss.get_value(db, "default_language", "ru")
+        audio_index = _resolve_audio_index(movie, params.get("audio_track"), lang_pref)
+        render_clip(
+            source, start, end, str(out), opts,
+            draft=False, crop_cx=crop, ass_path=ass_path, audio_index=audio_index,
+        )
 
         thumb = thumb_path(base)
         make_thumbnail(str(out), str(thumb))
