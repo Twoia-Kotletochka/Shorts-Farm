@@ -166,6 +166,7 @@ class ShortOut(BaseModel):
     end_ts: float
     has_preview: bool = False
     has_final: bool = False
+    rev: int = 0  # версия файлов (mtime); фронт добавляет ?v=rev для сброса кэша после ре-рендера
     created_at: datetime
 
 

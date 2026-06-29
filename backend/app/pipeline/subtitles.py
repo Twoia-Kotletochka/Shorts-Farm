@@ -75,9 +75,13 @@ def _escape(text: str) -> str:
 
 def build_ass(cues: list[dict], preset: dict | None, width: int, height: int) -> str:
     """Сгенерировать текст .ass из реплик клипа и пресета оформления."""
-    preset = preset or {}
-    style_json = preset.get("style_json") or {}
-    safe = style_json.get("safe_area") or {}
+    preset = preset if isinstance(preset, dict) else {}
+    style_json = preset.get("style_json")
+    if not isinstance(style_json, dict):  # битые данные пресета (напр. style_json=true)
+        style_json = {}
+    safe = style_json.get("safe_area")
+    if not isinstance(safe, dict):
+        safe = {}
 
     font = preset.get("font", "DejaVu Sans")
     size = int(preset.get("size", 48))

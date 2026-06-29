@@ -70,6 +70,7 @@ def serve_file(
     base_headers = {
         "accept-ranges": "bytes",
         "content-disposition": content_disposition,
+        "cache-control": "no-cache",  # файл по пути может перезаписаться при ре-рендере
     }
 
     range_header = request.headers.get("range")

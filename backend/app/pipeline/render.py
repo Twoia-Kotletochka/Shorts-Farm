@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -36,7 +37,21 @@ class RenderOptions:
 
 @lru_cache(maxsize=1)
 def _vaapi_available() -> bool:
-    return Path(VAAPI_DEVICE).exists() and has_vaapi()
+    # наличие энкодера в списке ≠ рабочая инициализация (libva/драйвер может падать).
+    # Делаем реальную пробу: тестовый кадр через h264_vaapi. Кэшируется на процесс.
+    if not (Path(VAAPI_DEVICE).exists() and has_vaapi()):
+        return False
+    try:
+        run([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+            "-vaapi_device", VAAPI_DEVICE,
+            "-f", "lavfi", "-i", "testsrc=size=64x64:rate=1:duration=1",
+            "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-f", "null", "-",
+        ], timeout=30)
+        return True
+    except FFmpegError:
+        log.info("VAAPI недоступен (инициализация не прошла) — использую libx264.")
+        return False
 
 
 # ===== обрезка тишины по краям (корректируем start/end, не рассинхронизируя A/V) =====
@@ -143,7 +158,12 @@ def render_clip(
     """Отрендерить один клип. Возвращает использованный энкодер. Откат VAAPI→libx264."""
     dur = max(0.1, end - start)
     w, h = (DRAFT_W, DRAFT_H) if draft else (opts.target_w, opts.target_h)
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    # пишем во временный файл и переименовываем по завершении: финальный путь появляется
+    # ТОЛЬКО когда рендер полностью готов (иначе has_final/has_preview = true на недописанном файле).
+    # Уникальный суффикс — чтобы параллельные рендеры одного шортса не писали в один файл.
+    tmp = out.with_name(f"{out.stem}.{uuid.uuid4().hex[:8]}.part.mp4")
 
     last_err: Exception | None = None
     for enc in _encoder_order(opts, draft):
@@ -160,14 +180,16 @@ def render_clip(
             cmd += ["-c:v", "h264_vaapi", "-b:v", "6M"]
         else:
             cmd += ["-c:v", "libx264", "-preset", "ultrafast" if draft else opts.preset,
-                    "-crf", "30" if draft else "20"]
-        cmd += ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_path]
+                    "-crf", "30" if draft else "18"]  # финал — высокое качество
+        cmd += ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(tmp)]
         try:
             run(cmd, timeout=3600)
+            tmp.replace(out)  # атомарная публикация готового файла
             return enc
         except FFmpegError as exc:
             last_err = exc
             log.warning("Рендер через %s не удался: %s", enc, exc)
+    tmp.unlink(missing_ok=True)
     raise last_err if last_err else FFmpegError("Рендер не выполнен")
 
 

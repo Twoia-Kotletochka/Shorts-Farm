@@ -32,6 +32,18 @@ def _exists(path: str | None) -> bool:
     return bool(path) and Path(path).exists()
 
 
+def _rev(s: Short) -> int:
+    """Версия файлов шортса (max mtime) — для cache-busting превью/финала на фронте."""
+    rev = 0
+    for p in (s.preview_path, s.file_path):
+        if p and Path(p).exists():
+            try:
+                rev = max(rev, int(Path(p).stat().st_mtime))
+            except OSError:
+                pass
+    return rev
+
+
 def to_out(s: Short) -> ShortOut:
     r = s.rating_json or {}
     return ShortOut(
@@ -50,6 +62,7 @@ def to_out(s: Short) -> ShortOut:
         end_ts=s.end_ts,
         has_preview=_exists(s.preview_path),
         has_final=_exists(s.file_path),
+        rev=_rev(s),
         created_at=s.created_at,
     )
 
@@ -98,8 +111,11 @@ def patch_short(db: Session, short_id: int, *, start_ts=None, end_ts=None, subti
     s = get_or_404(db, short_id)
     needs_rerender = False
     if subtitles_text is not None:
-        # мгновенный оверлей; прожиг — только в финале
-        s.subtitles_json = [{"text": subtitles_text}]
+        # ручная правка субтитров — сохраняем как override; прожигается при ре-рендере
+        md = dict(s.metadata_json or {})
+        md["subtitles_text"] = subtitles_text
+        s.metadata_json = md
+        needs_rerender = True
     if start_ts is not None:
         s.start_ts = start_ts
         needs_rerender = True
