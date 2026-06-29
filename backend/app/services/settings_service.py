@@ -125,6 +125,12 @@ def _update_password(db: Session, value) -> None:
     elif isinstance(value, str) and _looks_masked(value):
         return
     else:
+        # пароль ходит в HTTP-заголовке X-Panel-Password (latin-1) → только ASCII
+        if not str(value).isascii():
+            raise ValueError(
+                "Пароль панели — только ASCII (латиница, цифры, символы): "
+                "ограничение HTTP-заголовков."
+            )
         _set_raw(db, "panel_password", encrypt(value))
 
 

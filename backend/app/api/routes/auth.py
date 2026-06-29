@@ -24,7 +24,8 @@ def require_panel_auth(request: Request, db: Session = Depends(get_db)) -> None:
     if not password:
         return
     provided = request.headers.get("X-Panel-Password") or request.query_params.get("panel_key") or ""
-    if not (provided and secrets.compare_digest(provided, password)):
+    # сравниваем БАЙТЫ: compare_digest бросает TypeError на не-ASCII str (кириллица/emoji в пароле)
+    if not (provided and secrets.compare_digest(provided.encode("utf-8"), password.encode("utf-8"))):
         raise HTTPException(status_code=401, detail="Требуется пароль панели.")
 
 
@@ -40,6 +41,6 @@ def auth_login(payload: LoginIn, db: Session = Depends(get_db)) -> dict:
     password = ss.get_panel_password(db)
     if not password:
         return {"ok": True}
-    if payload.password and secrets.compare_digest(payload.password, password):
+    if payload.password and secrets.compare_digest(payload.password.encode("utf-8"), password.encode("utf-8")):
         return {"ok": True}
     raise HTTPException(status_code=401, detail="Неверный пароль.")

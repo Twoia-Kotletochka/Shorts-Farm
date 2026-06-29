@@ -38,7 +38,7 @@ def _rev(s: Short) -> int:
     for p in (s.preview_path, s.file_path):
         if p and Path(p).exists():
             try:
-                rev = max(rev, int(Path(p).stat().st_mtime))
+                rev = max(rev, int(Path(p).stat().st_mtime * 1000))  # мс: различать ре-рендеры в одну секунду
             except OSError:
                 pass
     return rev

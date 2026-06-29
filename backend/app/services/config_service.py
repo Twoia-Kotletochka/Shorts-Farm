@@ -95,7 +95,8 @@ def import_config(db: Session, data: dict) -> dict:
             continue
         exists = db.scalar(select(Profile).where(Profile.name == name))
         if exists:
-            exists.params_json = prof.get("params_json", {})
+            if "params_json" in prof:  # не затирать существующие параметры пустым {}
+                exists.params_json = prof["params_json"]
         else:
             db.add(Profile(name=name, params_json=prof.get("params_json", {})))
         imported["profiles"] += 1

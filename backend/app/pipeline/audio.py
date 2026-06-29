@@ -87,9 +87,10 @@ def chunk_audio(
             if chunk_path.stat().st_size <= max_bytes or cur <= 30.0:
                 break
             cur *= 0.6  # чанк не влез → короче и заново
-        if chunk_path.exists() and chunk_path.stat().st_size > 0:
-            chunks.append(AudioChunk(path=chunk_path, offset=start))
-            idx += 1
+        if not (chunk_path.exists() and chunk_path.stat().st_size > 0):
+            break  # чанк не создался — дальше тоже не выйдет; не оставляем пропусков аудио
+        chunks.append(AudioChunk(path=chunk_path, offset=start))
+        idx += 1
         # шаг = фактически покрытая длительность минус перекрытие (без пропусков)
         start += max(10.0, cur - overlap_sec)
 

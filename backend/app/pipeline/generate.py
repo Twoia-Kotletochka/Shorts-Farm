@@ -334,8 +334,7 @@ def _make_draft_short(db, job: Job, movie: Movie, cand, transcript: Transcript, 
         reason=cand.reason, status=ShortStatus.DRAFT,
     )
     db.add(short)
-    db.commit()
-    db.refresh(short)
+    db.flush()  # назначает id без коммита; при падении рендера откатится (без сироты-черновика)
     _render_preview(db, short, movie, source, params, opts, transcript, llm_cfg, audio_index)
     return short
 

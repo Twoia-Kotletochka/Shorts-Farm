@@ -1,7 +1,7 @@
 """Настройки + проверка подключения провайдеров."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ...db import get_db
@@ -19,7 +19,10 @@ def get_settings_route(db: Session = Depends(get_db)) -> dict:
 
 @router.put("/settings")
 def put_settings_route(payload: SettingsUpdate, db: Session = Depends(get_db)) -> dict:
-    ss.update_settings(db, payload.model_dump(exclude_unset=True))
+    try:
+        ss.update_settings(db, payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ss.get_settings_masked(db)
 
 

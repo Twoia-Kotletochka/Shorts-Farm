@@ -42,6 +42,8 @@ celery.conf.update(
     beat_schedule={
         "retention-daily": {"task": "maintenance.retention", "schedule": crontab(hour=4, minute=0)},
         "backup-daily": {"task": "maintenance.backup", "schedule": crontab(hour=4, minute=30)},
+        # после сброса дневной квоты провайдера (UTC) — вернуть ждавшие задачи в очередь
+        "recover-quota": {"task": "maintenance.recover", "schedule": crontab(hour=0, minute=5)},
     },
 )
 

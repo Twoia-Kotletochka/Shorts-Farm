@@ -18,13 +18,18 @@ from . import settings_service as ss
 log = logging.getLogger(__name__)
 
 
-def enqueue_job(job: Job) -> None:
-    """Поставить задачу генерации в очередь (с приоритетом). По имени — без импорта пайплайна."""
+def enqueue_job(job: Job, db: Session) -> None:
+    """Поставить задачу генерации в очередь. Сначала фиксируем свой task_id в БД (чтобы отмена/
+    revoke работали, даже если воркер схватит задачу мгновенно), потом отправляем с этим id."""
+    import uuid
+
+    tid = uuid.uuid4().hex
+    job.celery_task_id = tid
+    db.commit()
     try:
         from worker.celery_app import celery
 
-        result = celery.send_task("jobs.run", args=[job.id], queue="network", priority=job.priority)
-        job.celery_task_id = result.id
+        celery.send_task("jobs.run", args=[job.id], queue="network", priority=job.priority, task_id=tid)
     except Exception as exc:  # noqa: BLE001
         log.warning("Не удалось поставить задачу #%s в очередь: %s", job.id, exc)
 
@@ -60,7 +65,7 @@ def create_job(db: Session, payload: JobCreate) -> Job:
     db.add(job)
     db.commit()
     db.refresh(job)
-    enqueue_job(job)
+    enqueue_job(job, db)
     db.commit()
     log.info("Создана задача #%d для movie #%d.", job.id, job.movie_id)
     return job
@@ -81,7 +86,7 @@ def repeat_job(db: Session, job_id: int) -> Job:
     db.add(job)
     db.commit()
     db.refresh(job)
-    enqueue_job(job)
+    enqueue_job(job, db)
     db.commit()
     return job
 
@@ -235,7 +240,7 @@ def create_batch(db: Session, payload: JobBatchIn) -> list[int]:
         jobs.append(job)
     db.commit()
     for job in jobs:
-        enqueue_job(job)
+        enqueue_job(job, db)
     db.commit()
     log.info("Пакет: создано %d задач.", len(jobs))
     return [job.id for job in jobs]
