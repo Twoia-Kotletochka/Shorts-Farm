@@ -1,0 +1,165 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== Дизайн-токены (RGB-каналы для alpha через rgb(var(--x) / a)) ===== */
+:root {
+  --c-bg: 9 11 16; /* #090b10 — глубокий фон */
+  --c-bg-elev: 16 19 27; /* #10131b */
+  --c-surface: 22 26 35; /* #161a23 — карточки */
+  --c-surface-2: 29 34 46; /* #1d222e — приподнятые */
+  --c-surface-3: 38 44 58; /* #262c3a — hover/active */
+  --c-border: 38 44 58; /* #262c3a */
+  --c-border-strong: 54 62 80; /* #363e50 */
+
+  --c-text: 231 235 243; /* #e7ebf3 */
+  --c-text-muted: 150 160 180; /* #96a0b4 */
+  --c-text-faint: 103 112 132; /* #677084 */
+
+  --c-primary: 109 116 247; /* #6d74f7 индиго */
+  --c-primary-hover: 132 138 250; /* #848afa */
+  --c-primary-fg: 255 255 255;
+  --c-primary-soft: 32 34 64; /* подложка под акцент */
+
+  --c-accent: 167 139 250; /* #a78bfa фиолетовый */
+  --c-success: 52 199 123; /* #34c77b */
+  --c-warning: 234 179 8; /* #eab308 */
+  --c-danger: 244 86 86; /* #f45656 */
+  --c-info: 56 189 248; /* #38bdf8 */
+
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    border-color: rgb(var(--c-border));
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg text-content font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: rgb(var(--c-primary) / 0.35);
+  }
+
+  /* Скроллбары в тон тёмной теме */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--c-border-strong)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgb(var(--c-border-strong));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--c-text-faint));
+    background-clip: content-box;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-primary) / 0.7);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Скелетон-шиммер */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-surface-2;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--c-surface-3) / 0.65),
+      transparent
+    );
+    animation: shimmer 1.5s infinite;
+  }
+
+  /* Одиночный range-слайдер */
+  .sf-range {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 9999px;
+    background: linear-gradient(
+      to right,
+      rgb(var(--c-primary)) var(--pct, 50%),
+      rgb(var(--c-surface-3)) var(--pct, 50%)
+    );
+    outline: none;
+    cursor: pointer;
+  }
+  .sf-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 16px;
+    width: 16px;
+    border-radius: 9999px;
+    background: #fff;
+    border: none;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  }
+  .sf-range::-moz-range-thumb {
+    height: 16px;
+    width: 16px;
+    border-radius: 9999px;
+    background: #fff;
+    border: none;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  }
+
+  /* Двойной range: прозрачный трек, кликабельна только ручка */
+  .sf-range-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    pointer-events: none;
+    margin: 0;
+  }
+  .sf-range-thumb::-webkit-slider-runnable-track {
+    background: transparent;
+    height: 100%;
+  }
+  .sf-range-thumb::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    pointer-events: auto;
+    height: 16px;
+    width: 16px;
+    border-radius: 9999px;
+    background: #fff;
+    border: 2px solid rgb(var(--c-primary));
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+    cursor: pointer;
+  }
+  .sf-range-thumb::-moz-range-track {
+    background: transparent;
+  }
+  .sf-range-thumb::-moz-range-thumb {
+    pointer-events: auto;
+    height: 16px;
+    width: 16px;
+    border-radius: 9999px;
+    background: #fff;
+    border: 2px solid rgb(var(--c-primary));
+    cursor: pointer;
+  }
+}
