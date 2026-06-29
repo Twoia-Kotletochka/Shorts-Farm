@@ -125,6 +125,17 @@ class JobBatchOut(BaseModel):
     job_ids: list[int]
 
 
+class JobBulkIn(BaseModel):
+    ids: list[int]
+    action: Literal["delete", "cancel"]
+    delete_shorts: bool = False  # для action=delete: удалять ли готовые ролики задач
+
+
+class JobDeleteResult(BaseModel):
+    ok: bool
+    deleted_shorts: int = 0
+
+
 # ===== Шортсы =====
 class Rating(BaseModel):
     overall: float = 0.0

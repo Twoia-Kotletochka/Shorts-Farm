@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from ..models import Job, JobStatus, Movie, Profile
+from ..models import Job, JobStatus, Movie, Profile, Short
 from ..providers import provider_has_limits
 from ..schemas import JobBatchIn, JobCreate
 from . import settings_service as ss
@@ -103,6 +103,66 @@ def cancel_job(db: Session, job_id: int) -> Job:
     db.commit()
     db.refresh(job)
     return job
+
+
+_ACTIVE = (JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.WAITING_LIMIT)
+
+
+def _revoke(job: Job, *, terminate: bool) -> None:
+    if job.celery_task_id:
+        try:
+            from worker.celery_app import celery
+
+            celery.control.revoke(job.celery_task_id, terminate=terminate)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("revoke %s не удался: %s", job.celery_task_id, exc)
+
+
+def delete_job(db: Session, job_id: int, *, delete_shorts: bool = False) -> int:
+    """Удалить задачу (сломанную/ненужную). delete_shorts=True — удалить и её готовые ролики (с файлами).
+
+    delete_shorts=False — ролики сохраняются (отвязываются: job_id=NULL). → число удалённых шортсов.
+    """
+    job = db.get(Job, job_id)
+    if job is None:
+        raise LookupError("Задача не найдена.")
+    if job.status in _ACTIVE:
+        job.status = JobStatus.CANCELED
+        db.commit()
+        _revoke(job, terminate=True)  # снять выполняющуюся/ожидающую задачу
+
+    deleted = 0
+    if delete_shorts:
+        from .short_service import _remove_files
+
+        for s in db.scalars(select(Short).where(Short.job_id == job_id)).all():
+            _remove_files(s)
+            db.delete(s)
+            deleted += 1
+        db.flush()
+    else:
+        # сохранить ролики — отвязать от задачи (FK nullable), чтобы каскад их не снёс
+        db.execute(update(Short).where(Short.job_id == job_id).values(job_id=None))
+
+    # core-delete, минуя ORM-каскад delete-orphan (детей уже нет или отвязали)
+    db.execute(delete(Job).where(Job.id == job_id))
+    db.commit()
+    log.info("Задача #%d удалена (с роликами=%s, удалено %d).", job_id, delete_shorts, deleted)
+    return deleted
+
+
+def bulk_jobs(db: Session, ids: list[int], action: str, *, delete_shorts: bool = False) -> int:
+    affected = 0
+    for jid in ids:
+        try:
+            if action == "delete":
+                delete_job(db, jid, delete_shorts=delete_shorts)
+            elif action == "cancel":
+                cancel_job(db, jid)
+            affected += 1
+        except LookupError:
+            continue
+    return affected
 
 
 def set_priority(db: Session, job_id: int, priority: int) -> Job:

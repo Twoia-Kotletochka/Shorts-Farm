@@ -8,10 +8,13 @@ from sqlalchemy.orm import Session
 from ...db import get_db
 from ...models import Job
 from ...schemas import (
+    BulkResult,
     JobBatchIn,
     JobBatchOut,
+    JobBulkIn,
     JobCreate,
     JobCreated,
+    JobDeleteResult,
     JobEstimate,
     JobOut,
     PriorityIn,
@@ -47,6 +50,12 @@ def batch(payload: JobBatchIn, db: Session = Depends(get_db)) -> JobBatchOut:
     return JobBatchOut(job_ids=job_ids)
 
 
+@router.post("/bulk", response_model=BulkResult)
+def bulk(payload: JobBulkIn, db: Session = Depends(get_db)) -> BulkResult:
+    affected = job_service.bulk_jobs(db, payload.ids, payload.action, delete_shorts=payload.delete_shorts)
+    return BulkResult(ok=True, affected=affected)
+
+
 @router.get("/{job_id}", response_model=JobOut)
 def get_job(job_id: int, db: Session = Depends(get_db)) -> Job:
     job = db.get(Job, job_id)
@@ -78,3 +87,15 @@ def repeat_job(job_id: int, db: Session = Depends(get_db)) -> JobCreated:
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return JobCreated(job_id=job.id)
+
+
+@router.delete("/{job_id}", response_model=JobDeleteResult)
+def delete_job(
+    job_id: int, delete_shorts: bool = False, db: Session = Depends(get_db)
+) -> JobDeleteResult:
+    """Удалить задачу (сломанную/ненужную). delete_shorts=true — удалить и её готовые ролики."""
+    try:
+        deleted = job_service.delete_job(db, job_id, delete_shorts=delete_shorts)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JobDeleteResult(ok=True, deleted_shorts=deleted)
