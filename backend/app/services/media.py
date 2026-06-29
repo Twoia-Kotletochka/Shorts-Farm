@@ -40,7 +40,9 @@ def ffprobe(path: str) -> dict:
         path,
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120
+        )
     except FileNotFoundError as exc:
         raise ProbeError("ffprobe не найден в образе.") from exc
     except subprocess.TimeoutExpired as exc:

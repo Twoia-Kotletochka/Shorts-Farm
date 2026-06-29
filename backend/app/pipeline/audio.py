@@ -39,7 +39,7 @@ def extract_audio(
         log.info("Аудио из кэша: %s", out.name)
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
-    cmd = ["ffmpeg", "-y", "-i", str(movie_path)]
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(movie_path)]
     if audio_index is not None:
         cmd += ["-map", f"0:a:{audio_index}"]
     cmd += ["-vn", "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "flac", str(out)]
@@ -73,7 +73,7 @@ def chunk_audio(
     while start < duration:
         chunk_path = audio_path.with_name(f"{audio_path.stem}.part{idx:03d}.flac")
         run([
-            "ffmpeg", "-y",
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
             "-ss", f"{start:.3f}", "-t", f"{chunk_sec:.3f}",
             "-i", str(audio_path),
             "-ac", "1", "-ar", str(SAMPLE_RATE), "-c:a", "flac",

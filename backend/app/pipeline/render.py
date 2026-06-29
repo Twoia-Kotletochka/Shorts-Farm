@@ -144,7 +144,7 @@ def render_clip(
     for enc in _encoder_order(opts, draft):
         vaapi = enc == "vaapi"
         fc, amap = _build_filter_complex(opts, w, h, crop_cx, ass_path, vaapi, draft)
-        cmd = ["ffmpeg", "-y"]
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
         if vaapi:
             cmd += ["-vaapi_device", VAAPI_DEVICE]
         # input-seek: -ss ДО -i, не декодируем весь фильм ради куска
