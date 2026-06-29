@@ -11,7 +11,10 @@ from collections.abc import Callable, Iterable
 
 import numpy as np
 
-from ..providers import ProviderConfig, ProviderError, Transcript, TranscriptSegment, build_llm
+from ..providers import (
+    ProviderConfig, ProviderError, Transcript, TranscriptSegment,
+    build_llm, complete_failover,
+)
 from . import prompts, signals
 from .types import RATING_KEYS, Candidate
 
@@ -128,8 +131,8 @@ def analyze(
     progress_cb: ProgressCb = None,
 ) -> list[Candidate]:
     llm = build_llm(llm_config)
-    model_fast = llm_config.model_fast or llm_config.model
-    model_strong = llm_config.model
+    fast_models = llm_config.fast_models()    # балансир: дешёвые модели по приоритету
+    strong_models = llm_config.strong_models()  # сильные модели по приоритету
     dur_min, dur_max = target_duration
 
     def progress(p: float, msg: str) -> None:
@@ -142,12 +145,13 @@ def analyze(
     for i, batch_text in enumerate(batches):
         progress(0.1 + 0.4 * i / max(len(batches), 1), f"анализ 1/2 ({i + 1}/{len(batches)})")
         try:
-            out = llm.complete(
+            out = complete_failover(
+                llm,
                 [
                     {"role": "system", "content": prompts.pass1_system(language)},
                     {"role": "user", "content": prompts.pass1_user(batch_text, categories, dur_min, dur_max)},
                 ],
-                model=model_fast,
+                fast_models,
                 temperature=0.3,
                 max_tokens=1500,
                 response_format={"type": "json_object"},
@@ -169,12 +173,13 @@ def analyze(
     for gi, group in enumerate(groups):
         progress(0.5 + 0.4 * gi / max(len(groups), 1), f"анализ 2/2 ({gi + 1}/{len(groups)})")
         try:
-            out = llm.complete(
+            out = complete_failover(
+                llm,
                 [
                     {"role": "system", "content": prompts.pass2_system(language)},
                     {"role": "user", "content": prompts.pass2_user(_candidates_text(group, transcript), categories, dur_min, dur_max)},
                 ],
-                model=model_strong,
+                strong_models,
                 temperature=0.2,
                 max_tokens=2000,
                 response_format={"type": "json_object"},

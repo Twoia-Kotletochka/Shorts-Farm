@@ -11,6 +11,7 @@ from .base import (
     ProviderConfig,
     ProviderError,
     ProviderNotConfigured,
+    ProviderQuotaError,
     TranscriptionProvider,
 )
 from .openai_compat import OpenAICompatLLM, OpenAICompatSTT
@@ -49,6 +50,34 @@ def build_stt(config: ProviderConfig) -> TranscriptionProvider:
     _validate(config, "STT")
     # Ollama/OpenRouter — это LLM, не STT; для транскрипции их не берём (валидируется на уровне UI/настроек).
     return OpenAICompatSTT(config.base_url, config.api_key, config.model)
+
+
+def complete_failover(
+    llm: LLMProvider,
+    messages: list[dict],
+    models: list[str],
+    *,
+    max_attempts_per_model: int = 2,
+    **kwargs,
+) -> str:
+    """Балансир: пробуем модели по порядку, на лимите/ошибке — следующая (в т.ч. бесплатная).
+
+    Так распределяем нагрузку по моделям и не зависим от одной (квоты/кредиты/перегрузка).
+    """
+    errors: list[str] = []
+    for model in models:
+        if not model:
+            continue
+        try:
+            return llm.complete(messages, model=model, max_attempts=max_attempts_per_model, **kwargs)
+        except ProviderQuotaError as exc:
+            log.warning("Модель «%s»: лимит/кредиты — переключаюсь на следующую (%s).", model, exc)
+            errors.append(f"{model}: лимит")
+        except ProviderError as exc:
+            log.warning("Модель «%s»: ошибка — переключаюсь (%s).", model, exc)
+            errors.append(f"{model}: {exc}")
+    detail = " | ".join(errors) if errors else "список моделей пуст"
+    raise ProviderError(f"Все модели недоступны — {detail}")
 
 
 def test_provider(kind: str, config: ProviderConfig) -> tuple[bool, str | None]:

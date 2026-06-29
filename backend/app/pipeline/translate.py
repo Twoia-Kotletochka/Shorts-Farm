@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from ..providers import ProviderConfig, ProviderError, build_llm
+from ..providers import ProviderConfig, ProviderError, build_llm, complete_failover
 from . import prompts
 from .jsonutil import parse_json
 
@@ -15,11 +15,13 @@ def translate_lines(lines: list[str], llm_config: ProviderConfig, target_languag
         return lines
     llm = build_llm(llm_config)
     try:
-        out = llm.complete(
+        out = complete_failover(
+            llm,
             [
                 {"role": "system", "content": prompts.translate_system(target_language)},
                 {"role": "user", "content": prompts.translate_user(lines)},
             ],
+            llm_config.fast_models(),
             temperature=0.2,
             max_tokens=2000,
             response_format={"type": "json_object"},

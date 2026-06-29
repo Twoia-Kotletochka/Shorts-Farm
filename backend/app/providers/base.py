@@ -18,6 +18,10 @@ class ProviderNotConfigured(ProviderError):
     """Провайдер не настроен (нет ключа/модели/URL) — фронт ведёт в Настройки."""
 
 
+class ProviderQuotaError(ProviderError):
+    """Лимит/кредиты провайдера (HTTP 402/429) — балансир переключается на следующую модель."""
+
+
 @dataclass(frozen=True)
 class ProviderConfig:
     type: str
@@ -25,6 +29,21 @@ class ProviderConfig:
     api_key: str | None
     model: str
     model_fast: str | None = None  # дешёвая модель для первого прохода LLM (см. defaults.py)
+    # Списки для балансира (failover по моделям). Пусто → используется одиночный model/model_fast.
+    models: list[str] = field(default_factory=list)
+    models_fast: list[str] = field(default_factory=list)
+
+    def strong_models(self) -> list[str]:
+        """Сильные модели по приоритету (для 2-го прохода/метаданных)."""
+        return [m for m in (self.models or [self.model]) if m]
+
+    def fast_models(self) -> list[str]:
+        """Быстрые/дешёвые модели по приоритету (для 1-го прохода)."""
+        if self.models_fast:
+            return [m for m in self.models_fast if m]
+        if self.model_fast:
+            return [self.model_fast]
+        return self.strong_models()
 
 
 # --- транскрипт ---
@@ -76,6 +95,7 @@ class LLMProvider(Protocol):
         temperature: float = 0.4,
         max_tokens: int | None = None,
         response_format: dict | None = None,
+        max_attempts: int | None = None,
     ) -> str: ...
 
 

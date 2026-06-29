@@ -15,6 +15,7 @@ import httpx
 
 from .base import (
     ProviderError,
+    ProviderQuotaError,
     Transcript,
     TranscriptSegment,
     Word,
@@ -56,17 +57,21 @@ def _sleep_backoff(attempt: int, retry_after: float | None) -> None:
     time.sleep(delay)
 
 
-def _with_retry(do_request: Callable[[], httpx.Response]) -> httpx.Response:
-    """Выполнить запрос с повтором на 429/5xx/таймаут. Возвращает последний ответ."""
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+def _with_retry(do_request: Callable[[], httpx.Response], max_attempts: int | None = None) -> httpx.Response:
+    """Выполнить запрос с повтором на 429/5xx/таймаут. Возвращает последний ответ.
+
+    max_attempts можно занизить (балансир делает быстрый failover на следующую модель).
+    """
+    attempts = max_attempts or MAX_ATTEMPTS
+    for attempt in range(1, attempts + 1):
         try:
             resp = do_request()
         except (httpx.TimeoutException, httpx.TransportError) as exc:
-            if attempt >= MAX_ATTEMPTS:
+            if attempt >= attempts:
                 raise ProviderError(f"Сеть/таймаут после {attempt} попыток: {exc}") from exc
             _sleep_backoff(attempt, None)
             continue
-        if resp.status_code in RETRYABLE_STATUS and attempt < MAX_ATTEMPTS:
+        if resp.status_code in RETRYABLE_STATUS and attempt < attempts:
             _sleep_backoff(attempt, _retry_after(resp))
             continue
         return resp
@@ -91,6 +96,7 @@ class OpenAICompatLLM:
         temperature: float = 0.4,
         max_tokens: int | None = None,
         response_format: dict | None = None,
+        max_attempts: int | None = None,
     ) -> str:
         payload: dict = {
             "model": model or self.model,
@@ -108,12 +114,23 @@ class OpenAICompatLLM:
                 json=payload,
                 headers=_auth_headers(self.api_key),
                 timeout=DEFAULT_TIMEOUT,
-            ))
+            ), max_attempts=max_attempts)
             resp.raise_for_status()
             data = resp.json()
+            # некоторые OpenAI-совместимые сервера (напр. Ollama Cloud) отдают 200 + {"error": ...}
+            if isinstance(data, dict) and data.get("error"):
+                err = data["error"]
+                msg = err.get("message") if isinstance(err, dict) else str(err)
+                if "subscription" in msg.lower() or "quota" in msg.lower() or "limit" in msg.lower():
+                    raise ProviderQuotaError(msg)
+                raise ProviderError(msg)
             return data["choices"][0]["message"]["content"] or ""
         except httpx.HTTPStatusError as exc:
-            raise ProviderError(_http_error_text(exc)) from exc
+            code = exc.response.status_code
+            text = _http_error_text(exc)
+            if code in (402, 429):
+                raise ProviderQuotaError(text) from exc  # балансир уйдёт на след. модель
+            raise ProviderError(text) from exc
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             raise ProviderError(f"Ошибка LLM-запроса: {exc}") from exc
 
@@ -219,7 +236,15 @@ def _http_error_text(exc: httpx.HTTPStatusError) -> str:
     code = exc.response.status_code
     try:
         body = exc.response.json()
-        detail = body.get("error", {}).get("message") or body.get("detail") or str(body)
+        err = body.get("error") if isinstance(body, dict) else None
+        if isinstance(err, dict):
+            detail = err.get("message") or str(err)
+        elif isinstance(err, str):
+            detail = err
+        elif isinstance(body, dict):
+            detail = body.get("detail") or str(body)
+        else:
+            detail = str(body)
     except ValueError:
         detail = exc.response.text[:300]
     if code in (401, 403):

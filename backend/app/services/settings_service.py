@@ -51,6 +51,8 @@ def get_provider_config(db: Session, kind: str) -> ProviderConfig:
         api_key=api_key,
         model=raw.get("model", ""),
         model_fast=raw.get("model_fast"),
+        models=raw.get("models") or [],
+        models_fast=raw.get("models_fast") or [],
     )
 
 

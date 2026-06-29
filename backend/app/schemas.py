@@ -215,6 +215,9 @@ class ProviderIn(BaseModel):
     api_key: str | None = None
     model: str
     model_fast: str | None = None
+    # Балансир: списки моделей по приоритету (failover). Пусто → одиночные model/model_fast.
+    models: list[str] | None = None
+    models_fast: list[str] | None = None
 
 
 class RenderIn(BaseModel):
