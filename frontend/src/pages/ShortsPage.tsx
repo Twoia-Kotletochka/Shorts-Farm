@@ -38,6 +38,7 @@ import { plural } from '@/lib/format'
 import type { ShortListItem, ShortStatus } from '@/types/api'
 import { ShortCard } from '@/features/shorts/ShortCard'
 import { ShortDetailModal } from '@/features/shorts/ShortDetailModal'
+import { ShortViewerModal } from '@/features/shorts/ShortViewerModal'
 import { BulkBar } from '@/features/shorts/BulkBar'
 
 type StatusTab = 'all' | ShortStatus
@@ -57,7 +58,8 @@ export function ShortsPage() {
 
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [cursorId, setCursorId] = useState<number | null>(null)
-  const [openId, setOpenId] = useState<number | null>(null)
+  const [openId, setOpenId] = useState<number | null>(null) // деталь/правка
+  const [viewerId, setViewerId] = useState<number | null>(null) // крупный просмотр
 
   const filter: ShortsFilter = useMemo(
     () => ({
@@ -117,6 +119,7 @@ export function ShortsPage() {
 
   const activeShort: ShortListItem | undefined =
     cursorId == null ? undefined : items.find((s) => s.id === cursorId)
+  const viewerShort = viewerId == null ? null : (items.find((s) => s.id === viewerId) ?? null)
 
   function moveCursor(delta: 1 | -1) {
     if (items.length === 0) return
@@ -220,7 +223,7 @@ export function ShortsPage() {
         if (activeShort) toggleSelect(activeShort.id)
       },
     },
-    openId === null,
+    openId === null && viewerId === null,
   )
 
   // Прокрутка к активной карточке
@@ -373,7 +376,7 @@ export function ShortsPage() {
                 onToggleSelect={() => toggleSelect(short.id)}
                 onOpen={() => {
                   setCursorId(short.id)
-                  setOpenId(short.id)
+                  setViewerId(short.id)
                 }}
                 onApprove={() => approveOne(short)}
                 onReject={() => rejectOne(short)}
@@ -394,6 +397,20 @@ export function ShortsPage() {
           onClear={() => setSelected(new Set())}
         />
       )}
+
+      <ShortViewerModal
+        short={viewerShort}
+        open={viewerId !== null}
+        onClose={() => setViewerId(null)}
+        onApprove={approveOne}
+        onReject={rejectOne}
+        onDetails={(s) => {
+          setViewerId(null)
+          setOpenId(s.id)
+        }}
+        pendingApprove={approve.isPending && approve.variables === viewerShort?.id}
+        pendingReject={reject.isPending && reject.variables === viewerShort?.id}
+      />
 
       {openId !== null && (
         <ShortDetailModal id={openId} open={openId !== null} onClose={() => setOpenId(null)} />
