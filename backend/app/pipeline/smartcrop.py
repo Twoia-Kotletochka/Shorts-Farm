@@ -9,7 +9,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
-MAX_STEP = 0.12  # макс. сдвиг центра между соседними keyframe (плавность, без рывков)
+MAX_STEP = 0.30  # макс. сдвиг центра между соседними keyframe (выше → камера резче следит)
 
 
 def face_center_norm(video_path: str, start: float, end: float, samples: int = 8) -> float | None:
@@ -49,7 +49,7 @@ def face_center_norm(video_path: str, start: float, end: float, samples: int = 8
 
 
 def face_track(
-    video_path: str, start: float, end: float, *, step_sec: float = 2.0, max_kf: int = 20
+    video_path: str, start: float, end: float, *, step_sec: float = 1.0, max_kf: int = 40
 ) -> list[tuple[float, float]] | None:
     """Траектория центра лица: [(t_отн_клипа, cx_норм), ...] для динамического кропа.
 

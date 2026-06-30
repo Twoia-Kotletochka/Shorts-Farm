@@ -33,7 +33,7 @@ from .paths import clip_basename, movie_subdir, slug, thumb_path
 from .render import RenderOptions, concat_clips, detect_edge_silence, make_thumbnail, render_clip
 from .select import select_moments
 from .smartcrop import face_track
-from .subtitles import apply_translation, build_ass, build_soft_json, slice_cues
+from .subtitles import apply_translation, build_ass, build_soft_json, slice_cues, word_cues
 from .transcription import transcribe_movie
 from .translate import translate_lines
 
@@ -81,6 +81,23 @@ def _load_transcript(db: Session, movie_id: int) -> Transcript | None:
         for s in (row.segments_json or [])
     ]
     return Transcript(segments=segments, language=row.language, provider=row.provider, model=row.model)
+
+
+def _load_transcript_for(db: Session, movie: Movie, audio_index: int | None) -> Transcript | None:
+    """Транскрипт под КОНКРЕТНУЮ аудиодорожку шортса (из кэша по audio_index).
+
+    Строка transcripts в БД = последняя транскрибированная дорожка фильма; если для шортса
+    выбрана другая дорожка, субтитры разъезжались с озвучкой. Берём кэш под нужную дорожку,
+    fallback — строка БД.
+    """
+    from .audio import audio_key
+    from .transcription import _load_cache
+
+    file_hash = movie.file_hash or f"movie-{movie.id}"
+    cached = _load_cache(audio_key(file_hash, audio_index))
+    if cached is not None:
+        return cached
+    return _load_transcript(db, movie.id)
 
 
 def _load_preset(db: Session, preset_id: int | None) -> dict | None:
@@ -387,13 +404,19 @@ def _build_burn_ass(db, movie: Movie, transcript, start: float, end: float,
     else:
         if transcript is None:
             return None
-        cues = slice_cues(transcript, start, end)
-        if not cues:
-            return None
         sub_lang = params.get("subtitle_language")
         content_lang = transcript.language
         if sub_lang and content_lang and sub_lang != content_lang:
+            # другой язык → переводим по сегментам (так сохраняется контекст)
+            cues = slice_cues(transcript, start, end)
+            if not cues:
+                return None
             cues = apply_translation(cues, translate_lines([c["text"] for c in cues], llm_cfg, sub_lang))
+        else:
+            # язык субтитров = язык озвучки → короткие реплики по таймингу СЛОВ (точная синхронизация)
+            cues = word_cues(transcript, start, end)
+            if not cues:
+                return None
     preset = _load_preset(db, params.get("subtitle_preset_id"))
     ass_file = movie_subdir(movie) / f"{clip_basename(movie, start, end, tag)}.ass"
     ass_file.parent.mkdir(parents=True, exist_ok=True)
@@ -415,9 +438,9 @@ def run_final_render(short_id: int) -> None:
         llm_cfg = ss.get_provider_config(db, "llm")
         opts = _render_opts(params, render_settings)
 
-        transcript = _load_transcript(db, movie.id)
         lang_pref = params.get("language") or ss.get_value(db, "default_language", "ru")
         audio_index = _resolve_audio_index(movie, params.get("audio_track"), lang_pref)
+        transcript = _load_transcript_for(db, movie, audio_index)  # транскрипт под дорожку шортса
 
         # Компиляция: финал — пересборка склейки из сохранённых сегментов, а НЕ один
         # кусок [start_ts, end_ts] (это конверт от первого до последнего момента —
@@ -522,9 +545,9 @@ def rerender_short(short_id: int) -> None:
             render_settings = ss.get_value(db, "render", {}) or {}
             opts = _render_opts(params, render_settings)
             llm_cfg = ss.get_provider_config(db, "llm")
-            transcript = _load_transcript(db, movie.id)
             lang_pref = params.get("language") or ss.get_value(db, "default_language", "ru")
             audio_index = _resolve_audio_index(movie, params.get("audio_track"), lang_pref)
+            transcript = _load_transcript_for(db, movie, audio_index)  # транскрипт под дорожку шортса
             _render_preview(db, short, movie, source, params, opts, transcript, llm_cfg, audio_index)
             log.info("Превью шортса #%d пересобрано (новые границы/субтитры).", short_id)
     except Exception:  # noqa: BLE001

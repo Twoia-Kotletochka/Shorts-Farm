@@ -37,6 +37,48 @@ def slice_cues(transcript: Transcript, start: float, end: float) -> list[dict]:
     return cues
 
 
+def word_cues(
+    transcript: Transcript, start: float, end: float,
+    *, max_words: int = 6, max_gap: float = 0.7, max_dur: float = 2.6,
+) -> list[dict]:
+    """Короткие реплики по таймингу СЛОВ — субтитры точно совпадают с озвучкой.
+
+    Группируем слова в фразы (до max_words / паузы max_gap / длины max_dur), каждая реплика
+    показывается ровно в [время первого слова, время последнего]. Сегменты без word-таймкодов —
+    как есть (fallback). Времена перебазированы к началу клипа.
+    """
+    cues: list[dict] = []
+    for seg in transcript.segments:
+        if seg.end < start or seg.start > end:
+            continue
+        words = [w for w in seg.words if w.end >= start and w.start <= end and w.word.strip()]
+        if not words:
+            s, e = max(seg.start, start) - start, min(seg.end, end) - start
+            if e > s and seg.text.strip():
+                cues.append({"start": round(s, 3), "end": round(e, 3), "text": seg.text.strip(), "words": []})
+            continue
+        group: list = []
+        for w in words:
+            if group and (
+                len(group) >= max_words
+                or (w.start - group[-1].end) > max_gap
+                or (w.end - group[0].start) > max_dur
+            ):
+                cues.append(_cue_from_words(group, start, end))
+                group = []
+            group.append(w)
+        if group:
+            cues.append(_cue_from_words(group, start, end))
+    return [c for c in cues if c]
+
+
+def _cue_from_words(group: list, start: float, end: float) -> dict:
+    s = max(0.0, group[0].start - start)
+    e = min(end, group[-1].end) - start
+    text = " ".join(w.word.strip() for w in group if w.word.strip())
+    return {"start": round(s, 3), "end": round(max(e, s + 0.1), 3), "text": text, "words": []}
+
+
 def apply_translation(cues: list[dict], translated: list[str]) -> list[dict]:
     """Заменить текст реплик переводом (слова-таймкоды теряются — караоке отключаем)."""
     out = []
