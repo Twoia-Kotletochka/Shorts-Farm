@@ -32,7 +32,7 @@ from .metadata import generate_metadata
 from .paths import clip_basename, movie_subdir, slug, thumb_path
 from .render import RenderOptions, concat_clips, detect_edge_silence, make_thumbnail, render_clip
 from .select import select_moments
-from .smartcrop import face_center_norm
+from .smartcrop import face_track
 from .subtitles import apply_translation, build_ass, build_soft_json, slice_cues
 from .transcription import transcribe_movie
 from .translate import translate_lines
@@ -308,12 +308,12 @@ def _render_preview(db, short: Short, movie: Movie, source: str, params: dict,
     start, end = short.start_ts, short.end_ts
     base = _short_basename(movie, short)
     out = movie_subdir(movie) / f"{base}.preview.mp4"
-    crop = face_center_norm(source, start, end) if opts.reframe == "smartcrop" else None
+    track = face_track(source, start, end) if opts.reframe == "smartcrop" else None
     override = (short.metadata_json or {}).get("subtitles_text")
     ass_path = _build_burn_ass(db, movie, transcript, start, end, params, llm_cfg, opts,
                                f"prev{short.id}", override_text=override)
     render_clip(source, start, end, str(out), opts, draft=True,
-                crop_cx=crop, ass_path=ass_path, audio_index=audio_index)
+                crop_track=track, ass_path=ass_path, audio_index=audio_index)
 
     short.preview_path = str(out)
     short.duration = round(end - start, 3)
@@ -346,9 +346,9 @@ def _make_compilation_draft(db, job: Job, movie: Movie, chosen, transcript: Tran
     offset = 0.0
     for i, cand in enumerate(chosen):
         seg = workdir / f"seg{i:03d}.mp4"
-        crop = face_center_norm(source, cand.start, cand.end) if opts.reframe == "smartcrop" else None
+        track = face_track(source, cand.start, cand.end) if opts.reframe == "smartcrop" else None
         ass_path = _build_burn_ass(db, movie, transcript, cand.start, cand.end, params, llm_cfg, opts, f"compprev{i:03d}")
-        render_clip(source, cand.start, cand.end, str(seg), opts, draft=True, crop_cx=crop, ass_path=ass_path, audio_index=audio_index)
+        render_clip(source, cand.start, cand.end, str(seg), opts, draft=True, crop_track=track, ass_path=ass_path, audio_index=audio_index)
         segs.append(str(seg))
         for cue in slice_cues(transcript, cand.start, cand.end):
             soft.append({"start": cue["start"] + offset, "end": cue["end"] + offset, "text": cue["text"]})
@@ -436,10 +436,10 @@ def run_final_render(short_id: int) -> None:
                 if opts.trim_silence:
                     s, e = detect_edge_silence(source, s, e)
                 ass_path = _build_burn_ass(db, movie, transcript, s, e, params, llm_cfg, opts, f"compilation{i:03d}")
-                crop = face_center_norm(source, s, e) if opts.reframe == "smartcrop" else None
+                track = face_track(source, s, e) if opts.reframe == "smartcrop" else None
                 segf = workdir / f"seg{i:03d}.mp4"
                 render_clip(source, s, e, str(segf), opts, draft=False,
-                            crop_cx=crop, ass_path=ass_path, audio_index=audio_index)
+                            crop_track=track, ass_path=ass_path, audio_index=audio_index)
                 seg_files.append(str(segf))
                 total += max(0.0, e - s)
             concat_clips(seg_files, str(out), workdir)
@@ -452,9 +452,9 @@ def run_final_render(short_id: int) -> None:
             override = (short.metadata_json or {}).get("subtitles_text")
             ass_path = _build_burn_ass(db, movie, transcript, start, end, params, llm_cfg, opts,
                                        f"final{short.id}", override_text=override)
-            crop = face_center_norm(source, start, end) if opts.reframe == "smartcrop" else None
+            track = face_track(source, start, end) if opts.reframe == "smartcrop" else None
             render_clip(source, start, end, str(out), opts, draft=False,
-                        crop_cx=crop, ass_path=ass_path, audio_index=audio_index)
+                        crop_track=track, ass_path=ass_path, audio_index=audio_index)
             final_dur = round(end - start, 3)
 
         thumb = thumb_path(base)

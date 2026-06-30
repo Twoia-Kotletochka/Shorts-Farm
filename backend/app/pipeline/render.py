@@ -97,9 +97,25 @@ def _ass_escape(path: str) -> str:
     return path.replace("\\", "\\\\").replace(":", "\\:")
 
 
+def _track_x_expr(track: list[tuple[float, float]], w: int, h: int) -> str:
+    """ffmpeg-выражение x(t) для динамического кропа: кусочно-линейная интерполяция центра лица.
+    Внутри одинарных кавычек запятые литеральны (экранировать не нужно)."""
+    cropw = f"ih*{w}/{h}"
+    cx = f"{track[-1][1]:.4f}"  # после последнего keyframe — держим последнее значение
+    for i in range(len(track) - 1, 0, -1):
+        t0, c0 = track[i - 1]
+        t1, c1 = track[i]
+        dt = max(t1 - t0, 0.001)
+        seg = f"({c0:.4f}+({c1 - c0:.5f})*(t-{t0:.3f})/{dt:.3f})"
+        cx = f"if(lt(t,{t1:.3f}),{seg},{cx})"
+    cx = f"if(lt(t,{track[0][0]:.3f}),{track[0][1]:.4f},{cx})"
+    return f"clip(iw*({cx})-({cropw})/2,0,iw-({cropw}))"
+
+
 def _build_filter_complex(
     opts: RenderOptions, w: int, h: int, crop_cx: float | None, ass_path: str | None,
     vaapi: bool, draft: bool, audio_index: int | None,
+    crop_track: list[tuple[float, float]] | None = None,
 ) -> tuple[str, str]:
     ai = audio_index if audio_index is not None else 0
     if opts.reframe == "blurpad":
@@ -108,6 +124,10 @@ def _build_filter_complex(
             f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
         )
+    elif crop_track and len(crop_track) >= 2:
+        # ДИНАМИЧЕСКИЙ smart-crop: «камера» следит за лицом. setpts → t клипа начинается с 0.
+        xexpr = _track_x_expr(crop_track, w, h)
+        chain = f"[0:v]setpts=PTS-STARTPTS,crop=w=ih*{w}/{h}:h=ih:x='{xexpr}':y=0,scale={w}:{h}[v]"
     else:
         cx = crop_cx if crop_cx is not None else 0.5
         cropw = f"ih*{w}/{h}"
@@ -152,6 +172,7 @@ def render_clip(
     *,
     draft: bool = False,
     crop_cx: float | None = None,
+    crop_track: list[tuple[float, float]] | None = None,
     ass_path: str | None = None,
     audio_index: int | None = None,
 ) -> str:
@@ -168,7 +189,7 @@ def render_clip(
     last_err: Exception | None = None
     for enc in _encoder_order(opts, draft):
         vaapi = enc == "vaapi"
-        fc, amap = _build_filter_complex(opts, w, h, crop_cx, ass_path, vaapi, draft, audio_index)
+        fc, amap = _build_filter_complex(opts, w, h, crop_cx, ass_path, vaapi, draft, audio_index, crop_track)
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
         if vaapi:
             cmd += ["-vaapi_device", VAAPI_DEVICE]
