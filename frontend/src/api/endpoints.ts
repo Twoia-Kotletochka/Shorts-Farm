@@ -1,6 +1,7 @@
 import { http, mediaUrl } from './http'
 import type { ShortsFilter } from './keys'
 import type {
+  AuthStatus,
   BackupResult,
   Category,
   CategoryInput,
@@ -84,10 +85,13 @@ export const patchShort = (
 export const bulkShorts = (ids: number[], action: 'approve' | 'reject' | 'delete') =>
   http.post('/shorts/bulk', { ids, action }).then((r) => r.data)
 
-/** URL-ы медиа (для <video>/<img>/скачивания). */
-export const shortPreviewUrl = (id: number) => mediaUrl(`/shorts/${id}/preview`)
-export const shortFileUrl = (id: number) => mediaUrl(`/shorts/${id}/file`)
-export const shortThumbUrl = (id: number) => mediaUrl(`/shorts/${id}/thumbnail`)
+/** URL-ы медиа (для <video>/<img>/скачивания). rev → ?v= для сброса кэша после ре-рендера. */
+export const shortPreviewUrl = (id: number, rev?: number) =>
+  mediaUrl(`/shorts/${id}/preview`, { v: rev })
+export const shortFileUrl = (id: number, rev?: number) =>
+  mediaUrl(`/shorts/${id}/file`, { v: rev })
+export const shortThumbUrl = (id: number, rev?: number) =>
+  mediaUrl(`/shorts/${id}/thumbnail`, { v: rev })
 
 // ─── Пресеты субтитров ──────────────────────────────────────────────────────
 export const getPresets = () => http.get<SubtitlePreset[]>('/subtitle-presets').then((r) => r.data)
@@ -126,3 +130,8 @@ export const runBackup = () => http.post<BackupResult>('/backup').then((r) => r.
 export const exportConfig = () => http.get('/config/export').then((r) => r.data)
 export const importConfig = (json: unknown) =>
   http.post('/config/import', json).then((r) => r.data)
+
+// ─── Авторизация (опц. пароль панели) ───────────────────────────────────────
+export const getAuthStatus = () => http.get<AuthStatus>('/auth/status').then((r) => r.data)
+export const login = (password: string) =>
+  http.post<{ ok: boolean }>('/auth/login', { password }).then((r) => r.data)

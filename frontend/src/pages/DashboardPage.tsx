@@ -18,6 +18,20 @@ import { ActiveJobs } from '@/features/dashboard/ActiveJobs'
 import { formatGb } from '@/lib/format'
 import { isHealthUp } from '@/lib/labels'
 
+function ErrorCard({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <Card className="flex flex-col items-center justify-center gap-2 p-6 text-center">
+      <TriangleAlert className="h-6 w-6 text-danger" />
+      <p className="text-sm text-content-muted">Не удалось загрузить</p>
+      {onRetry && (
+        <Button variant="secondary" size="sm" onClick={onRetry}>
+          Повторить
+        </Button>
+      )}
+    </Card>
+  )
+}
+
 export function DashboardPage() {
   const usage = useUsage()
   const stats = useStats()
@@ -78,7 +92,7 @@ export function DashboardPage() {
             <MetricCard
               icon={ListChecks}
               label="Активные задачи"
-              value={activeCount}
+              value={jobs.isError ? '—' : activeCount}
               tone="info"
               hint={<Link to="/queue" className="hover:text-content">Перейти в очередь →</Link>}
             />
@@ -97,7 +111,11 @@ export function DashboardPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {usage.isLoading || !usage.data ? (
+            {usage.isError ? (
+              <div className="sm:col-span-2">
+                <ErrorCard onRetry={() => usage.refetch()} />
+              </div>
+            ) : usage.isLoading || !usage.data ? (
               <>
                 <Skeleton className="h-40" />
                 <Skeleton className="h-40" />
@@ -119,11 +137,23 @@ export function DashboardPage() {
               </>
             )}
           </div>
-          {jobs.data && <ActiveJobs jobs={jobs.data} />}
+          {jobs.isError ? (
+            <ErrorCard onRetry={() => jobs.refetch()} />
+          ) : jobs.data ? (
+            <ActiveJobs jobs={jobs.data} />
+          ) : (
+            <Skeleton className="h-48" />
+          )}
         </div>
 
         <div className="space-y-4">
-          {health.data ? <HealthCard health={health.data} /> : <Skeleton className="h-64" />}
+          {health.isError ? (
+            <ErrorCard onRetry={() => health.refetch()} />
+          ) : health.data ? (
+            <HealthCard health={health.data} />
+          ) : (
+            <Skeleton className="h-64" />
+          )}
         </div>
       </div>
     </div>

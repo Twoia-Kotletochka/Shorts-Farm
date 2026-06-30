@@ -13,7 +13,7 @@ interface StepMovieProps {
   selectedId: number
   audioTrack: number | string | null
   onSelect: (id: number) => void
-  onAudioTrack: (track: number | null) => void
+  onAudioTrack: (track: number | string | null) => void
 }
 
 export function StepMovie({ selectedId, audioTrack, onSelect, onAudioTrack }: StepMovieProps) {
@@ -165,7 +165,7 @@ function AudioTrackField({
 }: {
   movie: Movie
   value: number | string | null
-  onChange: (track: number | null) => void
+  onChange: (track: number | string | null) => void
 }) {
   const tracks = movie.audio_tracks ?? []
   const valueStr = value == null ? '' : String(value)
@@ -188,7 +188,7 @@ function AudioTrackField({
           const v = e.target.value
           if (v === '') return onChange(null)
           const n = Number(v)
-          onChange(Number.isNaN(n) ? null : n)
+          onChange(Number.isNaN(n) ? v : n) // index → число; код языка ("rus") → строка
         }}
       >
         <option value="">Авто (по языку)</option>

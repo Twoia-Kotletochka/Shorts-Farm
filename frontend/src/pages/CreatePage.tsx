@@ -190,8 +190,18 @@ export function CreatePage() {
               <StepCount
                 count={params.count}
                 format={params.format}
+                segmentSec={params.compilation_segment_sec ?? null}
+                totalSec={params.compilation_total_sec ?? null}
                 onCount={(count) => patch({ count })}
-                onFormat={(format) => patch({ format })}
+                onFormat={(format) =>
+                  patch(
+                    format === 'single'
+                      ? { format, compilation_segment_sec: null, compilation_total_sec: null }
+                      : { format },
+                  )
+                }
+                onSegmentSec={(compilation_segment_sec) => patch({ compilation_segment_sec })}
+                onTotalSec={(compilation_total_sec) => patch({ compilation_total_sec })}
               />
             )}
             {currentId === 'subtitles' && (

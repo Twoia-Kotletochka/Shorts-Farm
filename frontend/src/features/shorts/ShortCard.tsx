@@ -1,5 +1,5 @@
 import { Check, X, Download, Trash2, Maximize2 } from 'lucide-react'
-import { Button, Checkbox, Badge, Tooltip } from '@/components/ui'
+import { Button, Checkbox, Badge, Spinner, Tooltip } from '@/components/ui'
 import { ShortStatusBadge } from '@/components/common/badges'
 import { ShortPlayer } from './ShortPlayer'
 import { shortFileUrl } from '@/api/endpoints'
@@ -52,6 +52,7 @@ export function ShortCard({
           <ShortPlayer
             id={short.id}
             hasPreview={short.has_preview}
+            rev={short.rev}
             overall={short.rating.overall}
             className="rounded-none border-0"
           />
@@ -116,6 +117,16 @@ export function ShortCard({
             </Button>
           )}
 
+          {/* Идёт финальный рендер (одобрен, но финал ещё не готов) */}
+          {short.status === 'approved' && !short.has_final && (
+            <Tooltip content="Идёт финальный рендер (1–3 мин)">
+              <span className="inline-flex items-center gap-1.5 text-xs text-content-muted">
+                <Spinner className="h-3.5 w-3.5" />
+                рендерим…
+              </span>
+            </Tooltip>
+          )}
+
           {short.status !== 'rejected' && (
             <Tooltip content="Отклонить">
               <Button
@@ -132,8 +143,8 @@ export function ShortCard({
           )}
 
           {short.has_final && (
-            <Tooltip content="Скачать">
-              <a href={shortFileUrl(short.id)} download aria-label="Скачать">
+            <Tooltip content="Скачать финал">
+              <a href={shortFileUrl(short.id, short.rev)} download aria-label="Скачать">
                 <Button variant="ghost" size="icon" className="h-8 w-8" type="button">
                   <Download className="h-4 w-4" />
                 </Button>

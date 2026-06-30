@@ -15,7 +15,8 @@ export const useHealth = () =>
   useQuery({ queryKey: qk.health, queryFn: api.getHealth, refetchInterval: 15_000 })
 export const useUsage = () =>
   useQuery({ queryKey: qk.usage, queryFn: api.getUsage, refetchInterval: 30_000 })
-export const useStats = () => useQuery({ queryKey: qk.stats, queryFn: api.getStats })
+export const useStats = () =>
+  useQuery({ queryKey: qk.stats, queryFn: api.getStats, refetchInterval: 30_000 })
 
 // ─── Библиотека ─────────────────────────────────────────────────────────────
 export const useMovies = () => useQuery({ queryKey: qk.movies, queryFn: api.getMovies })
@@ -128,7 +129,9 @@ export const useShort = (id: number) =>
   useQuery({ queryKey: qk.short(id), queryFn: () => api.getShort(id), enabled: id > 0 })
 
 function invalidateShorts(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: ['shorts'] })
+  qc.invalidateQueries({ queryKey: ['shorts'] }) // списки
+  qc.invalidateQueries({ queryKey: ['short'] }) // открытая деталь (иначе модалка залипает)
+  qc.invalidateQueries({ queryKey: qk.stats }) // счётчики дашборда
 }
 
 export function useApproveShort() {

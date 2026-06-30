@@ -112,7 +112,10 @@ export interface JobParams {
   subtitle_language?: string | null
   effects: JobEffects
   reframe: ReframeMode
-  target_duration_sec: [number, number]
+  target_duration_sec: [number, number] // длина клипа (для format=single)
+  // Для format=compilation: длина каждого момента и общий бюджет монтажа (иначе — дефолты бэкенда).
+  compilation_segment_sec?: [number, number] | null // деф. [6,12]
+  compilation_total_sec?: number | null // деф. 60
   language: string
   audio_track?: number | string | null // index дорожки ИЛИ код языка ("rus"); null/опустить → авто
   allow_duplicates?: boolean
@@ -159,6 +162,8 @@ export interface ShortMetadata {
   hashtags: string[]
   first_comment: string
   variants?: string[]
+  /** Причина падения финального рендера (если был). Показываем на approved-без-final. */
+  render_error?: string | null
 }
 
 export interface SubtitleCue {
@@ -184,6 +189,8 @@ export interface ShortListItem {
   end_ts: number
   has_preview: boolean
   has_final: boolean
+  /** Версия файлов (mtime). Добавлять к URL медиа как ?v=rev для сброса кэша после ре-рендера. */
+  rev: number
   created_at: string
   movie_title?: string
 }
@@ -308,6 +315,11 @@ export interface Usage {
 export interface Stats {
   generated: number
   approved: number
+}
+
+// ─── Авторизация (опц. пароль панели) ───────────────────────────────────────
+export interface AuthStatus {
+  password_required: boolean
 }
 
 export type HealthFlag = boolean | string // bool | "not_configured"

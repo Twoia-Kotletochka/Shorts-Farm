@@ -56,7 +56,7 @@ export function ShortsPage() {
   const [movieId, setMovieId] = useState<number | 'all'>('all')
 
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [cursor, setCursor] = useState<number>(-1)
+  const [cursorId, setCursorId] = useState<number | null>(null)
   const [openId, setOpenId] = useState<number | null>(null)
 
   const filter: ShortsFilter = useMemo(
@@ -76,7 +76,7 @@ export function ShortsPage() {
   const remove = useDeleteShort()
   const bulk = useBulkShorts()
 
-  const items = shortsQuery.data ?? []
+  const items = useMemo(() => shortsQuery.data ?? [], [shortsQuery.data])
 
   // Счётчики по статусам (для табов) — берём из текущей выборки только при «Все».
   // Чтобы счётчики были стабильны, считаем по полному набору без фильтра статуса.
@@ -96,10 +96,10 @@ export function ShortsPage() {
     }
   }, [allForCounts.data])
 
-  // Сброс курсора при смене выборки
+  // Сбрасываем курсор, если шортс под ним исчез (поллинг/смена выборки/переупорядочивание).
   useEffect(() => {
-    setCursor((c) => (c >= items.length ? items.length - 1 : c))
-  }, [items.length])
+    setCursorId((id) => (id != null && !items.some((s) => s.id === id) ? null : id))
+  }, [items])
 
   // Убираем из выбора пропавшие id
   useEffect(() => {
@@ -115,7 +115,22 @@ export function ShortsPage() {
     })
   }, [items])
 
-  const activeShort: ShortListItem | undefined = cursor >= 0 ? items[cursor] : undefined
+  const activeShort: ShortListItem | undefined =
+    cursorId == null ? undefined : items.find((s) => s.id === cursorId)
+
+  function moveCursor(delta: 1 | -1) {
+    if (items.length === 0) return
+    setCursorId((curId) => {
+      const idx = curId == null ? -1 : items.findIndex((s) => s.id === curId)
+      const next =
+        idx < 0
+          ? delta > 0
+            ? 0
+            : items.length - 1
+          : Math.max(0, Math.min(items.length - 1, idx + delta))
+      return items[next]?.id ?? null
+    })
+  }
 
   function toggleSelect(id: number) {
     setSelected((prev) => {
@@ -161,16 +176,27 @@ export function ShortsPage() {
   }
 
   function runBulk(action: 'approve' | 'reject' | 'delete') {
-    const ids = Array.from(selected)
-    if (ids.length === 0) return
+    const all = Array.from(selected)
+    // Применимость: approve — только черновики; reject — только не-отклонённые; delete — любые.
+    const ids =
+      action === 'approve'
+        ? all.filter((id) => items.find((s) => s.id === id)?.status === 'draft')
+        : action === 'reject'
+          ? all.filter((id) => items.find((s) => s.id === id)?.status !== 'rejected')
+          : all
+    if (ids.length === 0) {
+      toast.info('Нет подходящих шортсов для этого действия')
+      return
+    }
     if (action === 'delete' && !window.confirm(`Удалить ${ids.length} шортс(ов) безвозвратно?`)) return
     bulk.mutate(
       { ids, action },
       {
-        onSuccess: () => {
+        onSuccess: (data) => {
+          const n = (data as { affected?: number } | undefined)?.affected ?? ids.length
           const verb =
             action === 'approve' ? 'одобрено' : action === 'reject' ? 'отклонено' : 'удалено'
-          toast.success(`Готово`, `${ids.length} ${plural(ids.length, 'шортс', 'шортса', 'шортсов')} ${verb}`)
+          toast.success('Готово', `${n} ${plural(n, 'шортс', 'шортса', 'шортсов')} ${verb}`)
           setSelected(new Set())
         },
         onError: (err) => toast.error(apiErrorMessage(err)),
@@ -181,13 +207,14 @@ export function ShortsPage() {
   // Хоткеи (отключены, пока открыта модалка)
   useHotkeys(
     {
-      j: () => setCursor((c) => Math.min((c < 0 ? -1 : c) + 1, items.length - 1)),
-      k: () => setCursor((c) => Math.max((c < 0 ? items.length : c) - 1, 0)),
+      j: () => moveCursor(1),
+      k: () => moveCursor(-1),
       a: () => {
         if (activeShort && activeShort.status === 'draft') approveOne(activeShort)
       },
       r: () => {
-        if (activeShort && activeShort.status !== 'rejected') rejectOne(activeShort)
+        // Только черновики: чтобы случайно не отклонить одобренный (это отменяет финальный рендер).
+        if (activeShort && activeShort.status === 'draft') rejectOne(activeShort)
       },
       x: () => {
         if (activeShort) toggleSelect(activeShort.id)
@@ -198,12 +225,10 @@ export function ShortsPage() {
 
   // Прокрутка к активной карточке
   useEffect(() => {
-    if (cursor < 0) return
-    const id = items[cursor]?.id
-    if (id == null) return
-    const el = document.querySelector(`[data-short-id="${id}"]`)
+    if (cursorId == null) return
+    const el = document.querySelector(`[data-short-id="${cursorId}"]`)
     el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [cursor, items])
+  }, [cursorId])
 
   const statusTabs: TabItem<StatusTab>[] = [
     { value: 'all', label: 'Все', icon: <LayoutGrid className="h-4 w-4" />, count: counts.all },
@@ -336,18 +361,18 @@ export function ShortsPage() {
       >
         {(data) => (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {data.map((short, idx) => (
+            {data.map((short) => (
               <ShortCard
                 key={short.id}
                 short={short}
                 selected={selected.has(short.id)}
-                active={idx === cursor}
+                active={short.id === cursorId}
                 pendingApprove={approve.isPending && approve.variables === short.id}
                 pendingReject={reject.isPending && reject.variables === short.id}
                 pendingDelete={remove.isPending && remove.variables === short.id}
                 onToggleSelect={() => toggleSelect(short.id)}
                 onOpen={() => {
-                  setCursor(idx)
+                  setCursorId(short.id)
                   setOpenId(short.id)
                 }}
                 onApprove={() => approveOne(short)}

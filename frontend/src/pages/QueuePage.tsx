@@ -63,7 +63,7 @@ export function QueuePage() {
   const [confirmBulk, setConfirmBulk] = useState(false)
   const [bulkDelShorts, setBulkDelShorts] = useState(false)
 
-  const allJobs = jobs.data ?? []
+  const allJobs = useMemo(() => jobs.data ?? [], [jobs.data])
 
   // Кол-во готовых роликов на каждую задачу (для чекбокса «удалить и ролики»).
   const shortsCount = useMemo(() => {
@@ -192,7 +192,14 @@ export function QueuePage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          <Tabs items={tabs} value={filter} onChange={setFilter} />
+          <Tabs
+            items={tabs}
+            value={filter}
+            onChange={(f) => {
+              setFilter(f)
+              setSelected(new Set()) // выбор не должен переживать смену фильтра (иначе bulk по невидимым)
+            }}
+          />
           {visible.length > 0 && (
             <Checkbox
               checked={allVisibleSelected}

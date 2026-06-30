@@ -65,11 +65,17 @@ export function ProviderForm({ kind, title, icon: Icon, initial }: ProviderFormP
   const needsKey = preset.needs_key
   const sttUnsupported = !isLlm && preset.stt_models.length === 0
   const incomingMasked = MASKED_RE.test(initial.api_key ?? '')
+  // Нельзя сохранять заведомо сломанный конфиг: STT без поддержки или LLM без моделей / STT без модели.
+  const invalidConfig =
+    (isLlm && models.length === 0) || (!isLlm && (sttUnsupported || model.trim() === ''))
 
   function applyType(next: ProviderType) {
     setType(next)
     const p = PROVIDER_PRESETS[next]
     setBaseUrl(p.base_url)
+    // У нового провайдера свой ключ — сбрасываем, чтобы не отправить маску старого.
+    setApiKey('')
+    setKeyTouched(true)
     if (isLlm) {
       setModels(p.llm_models)
       setModelsFast(p.llm_models_fast)
@@ -249,6 +255,7 @@ export function ProviderForm({ kind, title, icon: Icon, initial }: ProviderFormP
           size="sm"
           leftIcon={<PlugZap className="h-4 w-4" />}
           loading={test.isPending}
+          disabled={invalidConfig}
           onClick={handleTest}
         >
           Проверить подключение
@@ -258,6 +265,7 @@ export function ProviderForm({ kind, title, icon: Icon, initial }: ProviderFormP
           size="sm"
           leftIcon={<Save className="h-4 w-4" />}
           loading={update.isPending}
+          disabled={invalidConfig}
           onClick={handleSave}
         >
           Сохранить

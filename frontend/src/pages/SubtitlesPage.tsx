@@ -70,12 +70,18 @@ export function SubtitlesPage() {
     }
   }, [presets, selectedId])
 
+  const guardDirty = () =>
+    !dirty || window.confirm('Несохранённые изменения пресета будут потеряны. Продолжить?')
+
   const selectExisting = (p: SubtitlePreset) => {
+    if (p.id === selectedId) return // клик по уже активному — ничего не теряем
+    if (!guardDirty()) return
     setSelectedId(p.id)
     setDraft(toInput(p))
   }
 
   const startNew = () => {
+    if (!guardDirty()) return
     setSelectedId(NEW_ID)
     setDraft(blankPreset())
   }

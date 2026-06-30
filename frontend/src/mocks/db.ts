@@ -21,7 +21,7 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v))
 
 // Изменяемое состояние (копии фикстур)
 const movies: Movie[] = clone(fx.movies)
-let jobs: Job[] = clone(fx.jobs)
+const jobs: Job[] = clone(fx.jobs)
 let shorts: MockShort[] = clone(fx.shorts)
 let presets: SubtitlePreset[] = clone(fx.subtitlePresets)
 let profiles: Profile[] = clone(fx.profiles)
@@ -247,8 +247,25 @@ function toListItem(s: MockShort): ShortListItem {
     end_ts: s.end_ts,
     has_preview: !!s.preview_path,
     has_final: !!s.file_path,
+    rev: s.rev ?? 1,
     created_at: s.created_at,
     movie_title: s.movie_title,
+  }
+}
+
+/** Имитация асинхронных рендеров: ре-рендер превью после PATCH и финал после approve. */
+function tickShorts() {
+  const now = Date.now()
+  for (const s of shorts) {
+    if (s.rerender_at && now >= s.rerender_at) {
+      s.rev = (s.rev ?? 1) + 1
+      s.rerender_at = undefined
+    }
+    if (s.finalize_at && now >= s.finalize_at) {
+      s.file_path = s.preview_path?.replace('_preview', '_final') ?? `shorts/final_${s.id}.mp4`
+      s.rev = (s.rev ?? 1) + 1
+      s.finalize_at = undefined
+    }
   }
 }
 export function listShorts(filter?: {
@@ -257,6 +274,7 @@ export function listShorts(filter?: {
   sort?: string
 }): ShortListItem[] {
   tickJobs()
+  tickShorts()
   let list = shorts.slice()
   if (filter?.status) list = list.filter((s) => s.status === filter.status)
   if (filter?.movie_id != null) list = list.filter((s) => s.movie_id === Number(filter.movie_id))
@@ -265,6 +283,7 @@ export function listShorts(filter?: {
   return list.map(toListItem)
 }
 export function getShort(id: number): ShortDetail | undefined {
+  tickShorts()
   const s = shorts.find((x) => x.id === id)
   if (!s) return undefined
   return { ...toListItem(s), metadata: s.metadata, subtitles: s.subtitles }
@@ -275,7 +294,9 @@ export function approveShort(id: number) {
   const s = shorts.find((x) => x.id === id)
   if (s) {
     s.status = 'approved'
-    s.file_path = s.preview_path?.replace('_preview', '_final') ?? `shorts/final_${id}.mp4`
+    s.file_path = null // финал ещё не готов — имитируем рендер
+    s.finalize_at = Date.now() + 6000
+    if (s.metadata.render_error) s.metadata.render_error = null // повтор — сброс ошибки
   }
 }
 export function rejectShort(id: number) {
@@ -298,6 +319,7 @@ export function patchShort(
     const lines = body.subtitles_text.split('\n').filter(Boolean)
     s.subtitles = lines.map((text, i) => ({ start: i * 2, end: i * 2 + 2, text }))
   }
+  s.rerender_at = Date.now() + 3000 // имитация пере-рендера превью (rev вырастет)
 }
 export function bulkShorts(ids: number[], action: 'approve' | 'reject' | 'delete') {
   if (action === 'delete') {
@@ -362,7 +384,7 @@ export function deleteCategory(id: number) {
 }
 
 // ─── Settings ───────────────────────────────────────────────────────────────
-const MASK = '••••••••'
+const MASK = '****' // как у бэкенда ("****abcd"), чтобы совпадал с MASKED_RE формы провайдера
 function maskKey(v?: string | null): string | null {
   if (!v) return v ?? null
   return MASK + v.slice(-4)
@@ -376,7 +398,7 @@ export function getSettings(): Settings {
   return s
 }
 function isMasked(v?: string | null) {
-  return !v || v.includes('•')
+  return !v || v.includes('*')
 }
 export function updateSettings(body: SettingsUpdate): Settings {
   if (body.llm_provider) {

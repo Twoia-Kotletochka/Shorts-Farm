@@ -33,6 +33,10 @@ export interface MockShort {
   metadata: ShortMetadata
   subtitles: SubtitleCue[]
   created_at: string
+  rev?: number
+  // внутренние таймеры имитации (не отдаются в API)
+  finalize_at?: number
+  rerender_at?: number
 }
 
 const now = Date.now()

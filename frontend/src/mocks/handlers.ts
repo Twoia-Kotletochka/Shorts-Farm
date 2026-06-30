@@ -31,6 +31,10 @@ function thumbSvg(id: number): string {
 }
 
 export const handlers = [
+  // ── Авторизация (mock: пароль панели не требуется) ──
+  http.get(url('/auth/status'), () => HttpResponse.json({ password_required: false })),
+  http.post(url('/auth/login'), () => HttpResponse.json({ ok: true })),
+
   // ── Дашборд ──
   http.get(url('/health'), async () => {
     await delay(SLOW)
