@@ -169,8 +169,8 @@ def run_generation(job_id: int) -> None:
             raise RuntimeError("Фильм не найден.")
         params = job.params_json or {}
 
-        stt_cfg = ss.get_provider_config(db, "stt")
-        llm_cfg = ss.get_provider_config(db, "llm")
+        stt_configs = ss.get_provider_configs(db, "stt")
+        llm_configs = ss.get_provider_configs(db, "llm")
         render_settings = ss.get_value(db, "render", {}) or {}
         language = params.get("language") or ss.get_value(db, "default_language", "ru")
         categories = _resolve_categories(db, params.get("categories"))
@@ -210,7 +210,7 @@ def run_generation(job_id: int) -> None:
         # учёт STT-квоты происходит внутри transcribe_movie (только при реальной
         # транскрипции, не на кэш-хите, и только для провайдеров с квотами)
         transcript = transcribe_movie(
-            db, movie, stt_cfg, language=None, audio_index=audio_index, progress_cb=tcb
+            db, movie, stt_configs, language=None, audio_index=audio_index, progress_cb=tcb
         )
         if _is_canceled(db, job_id):
             return
@@ -232,7 +232,7 @@ def run_generation(job_id: int) -> None:
             db.commit()
 
         candidates = analyze(
-            transcript, categories=categories, llm_config=llm_cfg, target_duration=target,
+            transcript, categories=categories, llm_configs=llm_configs, target_duration=target,
             language=language, scene_cuts=cuts, rms=rms, rms_window=win, progress_cb=acb,
         )
         if _is_canceled(db, job_id):
@@ -258,14 +258,14 @@ def run_generation(job_id: int) -> None:
         _stage(db, job, JobStage.PREVIEW, 0.8)
         opts = _render_opts(params, render_settings)
         if fmt == "compilation":
-            _make_compilation_draft(db, job, movie, chosen, transcript, opts, source, audio_index, llm_cfg, params)
+            _make_compilation_draft(db, job, movie, chosen, transcript, opts, source, audio_index, llm_configs, params)
         else:
             for i, cand in enumerate(chosen):
                 if _is_canceled(db, job_id):
                     return
                 if not ensure_disk():
                     raise RuntimeError("Недостаточно места на диске для рендера.")
-                _make_draft_short(db, job, movie, cand, transcript, opts, source, audio_index, llm_cfg, params)
+                _make_draft_short(db, job, movie, cand, transcript, opts, source, audio_index, llm_configs, params)
                 job.progress = round(0.8 + 0.18 * (i + 1) / len(chosen), 3)
                 db.commit()
 
@@ -317,7 +317,7 @@ def _short_basename(movie: Movie, short: Short) -> str:
 
 
 def _render_preview(db, short: Short, movie: Movie, source: str, params: dict,
-                    opts: RenderOptions, transcript: Transcript, llm_cfg, audio_index: int | None) -> None:
+                    opts: RenderOptions, transcript: Transcript, llm_configs, audio_index: int | None) -> None:
     """(Пере)рендер чернового превью с ПРОЖИГОМ субтитров (WYSIWYG ещё до одобрения).
 
     Границы берём из short.start_ts/end_ts (после правки — новые). Путь стабилен по id.
@@ -327,7 +327,7 @@ def _render_preview(db, short: Short, movie: Movie, source: str, params: dict,
     out = movie_subdir(movie) / f"{base}.preview.mp4"
     track = face_track(source, start, end) if opts.reframe == "smartcrop" else None
     override = (short.metadata_json or {}).get("subtitles_text")
-    ass_path = _build_burn_ass(db, movie, transcript, start, end, params, llm_cfg, opts,
+    ass_path = _build_burn_ass(db, movie, transcript, start, end, params, llm_configs, opts,
                                f"prev{short.id}", override_text=override)
     render_clip(source, start, end, str(out), opts, draft=True,
                 crop_track=track, ass_path=ass_path, audio_index=audio_index)
@@ -342,7 +342,7 @@ def _render_preview(db, short: Short, movie: Movie, source: str, params: dict,
 
 
 def _make_draft_short(db, job: Job, movie: Movie, cand, transcript: Transcript, opts: RenderOptions,
-                      source: str, audio_index: int | None, llm_cfg, params: dict) -> Short:
+                      source: str, audio_index: int | None, llm_configs, params: dict) -> Short:
     # сначала создаём запись (нужен id для стабильного имени файла), потом рендерим превью
     short = Short(
         job_id=job.id, movie_id=movie.id, moment_id=cand.moment_id, variant_no=1,
@@ -352,11 +352,11 @@ def _make_draft_short(db, job: Job, movie: Movie, cand, transcript: Transcript, 
     )
     db.add(short)
     db.flush()  # назначает id без коммита; при падении рендера откатится (без сироты-черновика)
-    _render_preview(db, short, movie, source, params, opts, transcript, llm_cfg, audio_index)
+    _render_preview(db, short, movie, source, params, opts, transcript, llm_configs, audio_index)
     return short
 
 
-def _make_compilation_draft(db, job: Job, movie: Movie, chosen, transcript: Transcript, opts: RenderOptions, source: str, audio_index: int | None, llm_cfg, params: dict) -> Short:
+def _make_compilation_draft(db, job: Job, movie: Movie, chosen, transcript: Transcript, opts: RenderOptions, source: str, audio_index: int | None, llm_configs, params: dict) -> Short:
     workdir = movie_subdir(movie) / f"job{job.id}_tmp"
     segs: list[str] = []
     soft: list[dict] = []
@@ -364,7 +364,7 @@ def _make_compilation_draft(db, job: Job, movie: Movie, chosen, transcript: Tran
     for i, cand in enumerate(chosen):
         seg = workdir / f"seg{i:03d}.mp4"
         track = face_track(source, cand.start, cand.end) if opts.reframe == "smartcrop" else None
-        ass_path = _build_burn_ass(db, movie, transcript, cand.start, cand.end, params, llm_cfg, opts, f"compprev{i:03d}")
+        ass_path = _build_burn_ass(db, movie, transcript, cand.start, cand.end, params, llm_configs, opts, f"compprev{i:03d}")
         render_clip(source, cand.start, cand.end, str(seg), opts, draft=True, crop_track=track, ass_path=ass_path, audio_index=audio_index)
         segs.append(str(seg))
         for cue in slice_cues(transcript, cand.start, cand.end):
@@ -392,7 +392,7 @@ def _make_compilation_draft(db, job: Job, movie: Movie, chosen, transcript: Tran
 
 
 def _build_burn_ass(db, movie: Movie, transcript, start: float, end: float,
-                    params: dict, llm_cfg, opts: RenderOptions, tag: str,
+                    params: dict, llm_configs, opts: RenderOptions, tag: str,
                     override_text: str | None = None) -> str | None:
     """Прожигаемый ASS для куска [start, end] (реплики перебазированы к 0).
     None — если субтитры выключены или нет реплик. override_text — ручная правка субтитров
@@ -411,7 +411,7 @@ def _build_burn_ass(db, movie: Movie, transcript, start: float, end: float,
             cues = slice_cues(transcript, start, end)
             if not cues:
                 return None
-            cues = apply_translation(cues, translate_lines([c["text"] for c in cues], llm_cfg, sub_lang))
+            cues = apply_translation(cues, translate_lines([c["text"] for c in cues], llm_configs, sub_lang))
         else:
             # язык субтитров = язык озвучки → короткие реплики по таймингу СЛОВ (точная синхронизация)
             cues = word_cues(transcript, start, end)
@@ -435,7 +435,7 @@ def run_final_render(short_id: int) -> None:
         source = str(sources_dir() / movie.rel_path)
         params = short.job.params_json if short.job else {}
         render_settings = ss.get_value(db, "render", {}) or {}
-        llm_cfg = ss.get_provider_config(db, "llm")
+        llm_configs = ss.get_provider_configs(db, "llm")
         opts = _render_opts(params, render_settings)
 
         lang_pref = params.get("language") or ss.get_value(db, "default_language", "ru")
@@ -458,7 +458,7 @@ def run_final_render(short_id: int) -> None:
                 s, e = float(seg["start"]), float(seg["end"])
                 if opts.trim_silence:
                     s, e = detect_edge_silence(source, s, e)
-                ass_path = _build_burn_ass(db, movie, transcript, s, e, params, llm_cfg, opts, f"compilation{i:03d}")
+                ass_path = _build_burn_ass(db, movie, transcript, s, e, params, llm_configs, opts, f"compilation{i:03d}")
                 track = face_track(source, s, e) if opts.reframe == "smartcrop" else None
                 segf = workdir / f"seg{i:03d}.mp4"
                 render_clip(source, s, e, str(segf), opts, draft=False,
@@ -473,7 +473,7 @@ def run_final_render(short_id: int) -> None:
             if opts.trim_silence:
                 start, end = detect_edge_silence(source, start, end)
             override = (short.metadata_json or {}).get("subtitles_text")
-            ass_path = _build_burn_ass(db, movie, transcript, start, end, params, llm_cfg, opts,
+            ass_path = _build_burn_ass(db, movie, transcript, start, end, params, llm_configs, opts,
                                        f"final{short.id}", override_text=override)
             track = face_track(source, start, end) if opts.reframe == "smartcrop" else None
             render_clip(source, start, end, str(out), opts, draft=False,
@@ -500,7 +500,7 @@ def run_final_render(short_id: int) -> None:
             md.pop("render_error", None)  # успех — сбросить прошлую ошибку рендера
             md.update(generate_metadata(
                 hook_title=short.hook_title or "", category=short.category,
-                transcript_text=text, llm_config=llm_cfg, language=lang_pref,
+                transcript_text=text, llm_configs=llm_configs, language=lang_pref,
             ))
             short.metadata_json = md
             db.commit()
@@ -544,11 +544,11 @@ def rerender_short(short_id: int) -> None:
             params = short.job.params_json if short.job else {}
             render_settings = ss.get_value(db, "render", {}) or {}
             opts = _render_opts(params, render_settings)
-            llm_cfg = ss.get_provider_config(db, "llm")
+            llm_configs = ss.get_provider_configs(db, "llm")
             lang_pref = params.get("language") or ss.get_value(db, "default_language", "ru")
             audio_index = _resolve_audio_index(movie, params.get("audio_track"), lang_pref)
             transcript = _load_transcript_for(db, movie, audio_index)  # транскрипт под дорожку шортса
-            _render_preview(db, short, movie, source, params, opts, transcript, llm_cfg, audio_index)
+            _render_preview(db, short, movie, source, params, opts, transcript, llm_configs, audio_index)
             log.info("Превью шортса #%d пересобрано (новые границы/субтитры).", short_id)
     except Exception:  # noqa: BLE001
         log.exception("Перерендер шортса #%d упал", short_id)

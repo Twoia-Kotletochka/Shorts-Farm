@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from sqlalchemy.orm import Session
 
@@ -18,7 +19,8 @@ from ..providers import ProviderConfig
 
 log = logging.getLogger(__name__)
 
-PROVIDER_KEYS = ("llm_provider", "stt_provider")
+PROVIDER_KEYS = ("llm_provider", "stt_provider")          # одиночный (совместимость)
+PROVIDER_LIST_KEYS = ("llm_providers", "stt_providers")   # приоритетные списки (index 0 = высший)
 
 
 # --- низкоуровневые helpers ---
@@ -40,20 +42,35 @@ def get_value(db: Session, key: str, default=None):
 
 
 # --- провайдеры ---
-def get_provider_config(db: Session, kind: str) -> ProviderConfig:
-    """kind = 'llm' | 'stt'. Возвращает конфиг с расшифрованным api_key."""
-    key = "llm_provider" if kind == "llm" else "stt_provider"
-    raw = dict(_get_raw(db, key) or DEFAULT_SETTINGS[key])
-    api_key = _decrypt_safe(raw.get("api_key") or "")
+def _raw_to_config(raw: dict) -> ProviderConfig:
+    raw = dict(raw or {})
     return ProviderConfig(
         type=raw.get("type", ""),
         base_url=raw.get("base_url"),
-        api_key=api_key,
+        api_key=_decrypt_safe(raw.get("api_key") or ""),
         model=raw.get("model", ""),
         model_fast=raw.get("model_fast"),
         models=raw.get("models") or [],
         models_fast=raw.get("models_fast") or [],
     )
+
+
+def get_provider_configs(db: Session, kind: str) -> list[ProviderConfig]:
+    """kind = 'llm' | 'stt'. Список конфигов ПО ПРИОРИТЕТУ (index 0 = высший), ключи расшифрованы.
+
+    Берём приоритетный список (llm_providers/stt_providers); если его нет — одиночный provider.
+    """
+    list_key = f"{kind}_providers"
+    raw_list = _get_raw(db, list_key)
+    if not raw_list:
+        single = _get_raw(db, f"{kind}_provider") or DEFAULT_SETTINGS[f"{kind}_provider"]
+        raw_list = [single]
+    return [_raw_to_config(p) for p in raw_list if p]
+
+
+def get_provider_config(db: Session, kind: str) -> ProviderConfig:
+    """Основной (высший приоритет) провайдер — для health/usage/providers-test."""
+    return get_provider_configs(db, kind)[0]
 
 
 def _decrypt_safe(token: str) -> str:
@@ -84,6 +101,14 @@ def get_settings_masked(db: Session) -> dict:
             out["panel_password_set"] = bool(raw)
         else:
             out[key] = raw
+    # приоритетные списки провайдеров (с масками и id)
+    for list_key in PROVIDER_LIST_KEYS:
+        raw_list = _get_raw(db, list_key)
+        if not raw_list:
+            single_key = list_key[:-1]  # llm_providers -> llm_provider
+            single = _get_raw(db, single_key, DEFAULT_SETTINGS[single_key])
+            raw_list = [{**dict(single), "id": "primary"}]
+        out[list_key] = [_mask_provider(p) for p in raw_list]
     return out
 
 
@@ -91,14 +116,54 @@ def get_settings_masked(db: Session) -> dict:
 def update_settings(db: Session, payload: dict) -> None:
     """payload — только изменённые поля (model_dump(exclude_unset=True))."""
     for key, value in payload.items():
-        if key in PROVIDER_KEYS:
+        if key in PROVIDER_LIST_KEYS:
+            if value is not None:
+                _update_provider_list(db, key, value)
+        elif key in PROVIDER_KEYS:
             if value is not None:
                 _update_provider(db, key, value)
+                _sync_single_into_list(db, key)
         elif key == "panel_password":
             _update_password(db, value)
         elif value is not None:
             _set_raw(db, key, value)
     db.commit()
+
+
+def _update_provider_list(db: Session, list_key: str, providers: list[dict]) -> None:
+    """Сохранить приоритетный список провайдеров. Ключи сохраняются по id (маска не затирает)."""
+    existing = _get_raw(db, list_key) or []
+    by_id = {p.get("id"): p for p in existing if isinstance(p, dict) and p.get("id")}
+    out: list[dict] = []
+    for p in providers:
+        p = dict(p)
+        pid = p.get("id") or uuid.uuid4().hex
+        p["id"] = pid
+        incoming = p.get("api_key")
+        if not incoming or _looks_masked(incoming):
+            p["api_key"] = by_id.get(pid, {}).get("api_key", "")  # сохранить прежний ключ
+        else:
+            p["api_key"] = encrypt(incoming)
+        out.append(p)
+    _set_raw(db, list_key, out)
+    # зеркалим первый в одиночный provider (совместимость health/usage/providers-test)
+    single_key = list_key[:-1]
+    if out:
+        _set_raw(db, single_key, {k: v for k, v in out[0].items() if k != "id"})
+
+
+def _sync_single_into_list(db: Session, single_key: str) -> None:
+    """Правка одиночного provider (легаси-путь) → синхронизировать первый элемент списка."""
+    list_key = single_key + "s"
+    single = _get_raw(db, single_key) or {}
+    lst = _get_raw(db, list_key)
+    if not lst:
+        _set_raw(db, list_key, [{**dict(single), "id": uuid.uuid4().hex}])
+        return
+    lst = list(lst)
+    first = dict(lst[0]) if isinstance(lst[0], dict) else {}
+    lst[0] = {**dict(single), "id": first.get("id") or uuid.uuid4().hex}
+    _set_raw(db, list_key, lst)
 
 
 def _update_provider(db: Session, key: str, value: dict) -> None:

@@ -3,25 +3,24 @@ from __future__ import annotations
 
 import logging
 
-from ..providers import ProviderConfig, ProviderError, build_llm, complete_failover
+from ..providers import ProviderConfig, ProviderError, llm_text
 from . import prompts
 from .jsonutil import parse_json
 
 log = logging.getLogger(__name__)
 
 
-def translate_lines(lines: list[str], llm_config: ProviderConfig, target_language: str) -> list[str]:
+def translate_lines(lines: list[str], llm_configs: list[ProviderConfig], target_language: str) -> list[str]:
     if not lines:
         return lines
-    llm = build_llm(llm_config)
     try:
-        out = complete_failover(
-            llm,
+        out = llm_text(
+            llm_configs,
             [
                 {"role": "system", "content": prompts.translate_system(target_language)},
                 {"role": "user", "content": prompts.translate_user(lines)},
             ],
-            llm_config.fast_models(),
+            tier="fast",
             temperature=0.2,
             max_tokens=2000,
             response_format={"type": "json_object"},

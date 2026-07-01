@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from ..providers import ProviderConfig, ProviderError, build_llm, complete_failover
+from ..providers import ProviderConfig, ProviderError, llm_text
 from . import prompts
 from .jsonutil import parse_json
 
@@ -18,18 +18,17 @@ def generate_metadata(
     hook_title: str,
     category: str | None,
     transcript_text: str,
-    llm_config: ProviderConfig,
+    llm_configs: list[ProviderConfig],
     language: str,
 ) -> dict:
-    llm = build_llm(llm_config)
     try:
-        out = complete_failover(
-            llm,
+        out = llm_text(
+            llm_configs,
             [
                 {"role": "system", "content": prompts.metadata_system(language)},
                 {"role": "user", "content": prompts.metadata_user(hook_title, category, transcript_text)},
             ],
-            llm_config.strong_models(),
+            tier="strong",
             temperature=0.6,
             max_tokens=800,
             response_format={"type": "json_object"},

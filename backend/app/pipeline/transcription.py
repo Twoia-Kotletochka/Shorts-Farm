@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Movie, Transcript as TranscriptRow, TranscriptionStatus
 from ..providers import (
-    ProviderConfig, Transcript, TranscriptSegment, Word, build_stt, provider_has_limits,
+    ProviderConfig, Transcript, TranscriptSegment, Word, provider_has_limits, stt_transcribe,
 )
 from ..services import usage_service
 from ..storage import sources_dir, transcripts_cache_dir
@@ -90,7 +90,7 @@ def _merge(chunk_transcripts: list[tuple[Transcript, float]]) -> Transcript:
 def transcribe_movie(
     db: Session,
     movie: Movie,
-    stt_config: ProviderConfig,
+    stt_configs: list[ProviderConfig],
     *,
     language: str | None = None,
     audio_index: int | None = None,
@@ -126,7 +126,6 @@ def transcribe_movie(
         db.commit()
         raise FileNotFoundError(f"Файл исходника не найден: {movie_path}")
 
-    provider = build_stt(stt_config)
     audio: Path | None = None
     chunks: list = []
     try:
@@ -137,17 +136,18 @@ def transcribe_movie(
         results: list[tuple[Transcript, float]] = []
         for i, chunk in enumerate(chunks):
             progress(0.1 + 0.8 * i / max(len(chunks), 1), f"транскрипция {i + 1}/{len(chunks)}")
-            tr = provider.transcribe(str(chunk.path), language=language)
+            tr = stt_transcribe(stt_configs, str(chunk.path), language=language)  # фейловер по STT-провайдерам
             results.append((tr, chunk.offset))
 
         merged = _merge(results)
-        merged.provider = stt_config.type
-        merged.model = stt_config.model
+        primary = stt_configs[0]
+        merged.provider = primary.type
+        merged.model = primary.model
 
         _save_cache(cache_key, merged)
         _persist(db, movie, merged)
-        # квоту списываем только за реальную транскрипцию и только у провайдера с квотами
-        if provider_has_limits(stt_config.type):
+        # квоту списываем только за реальную транскрипцию и только у основного провайдера с квотами
+        if provider_has_limits(primary.type):
             usage_service.record_seconds(db, movie.duration or 0.0)
         progress(1.0, "транскрипт готов")
         log.info("Транскрипт готов для movie #%d: %d сегментов.", movie.id, len(merged.segments))

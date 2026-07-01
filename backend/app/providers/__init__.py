@@ -12,7 +12,9 @@ from .base import (
     TranscriptSegment,
     Word,
 )
-from .factory import build_llm, build_stt, complete_failover, provider_has_limits, test_provider
+from .factory import (
+    build_llm, build_stt, complete_failover, llm_text, provider_has_limits, stt_transcribe, test_provider,
+)
 from .registry import Exporter, effects, exporters, scene_detectors
 
 __all__ = [
@@ -28,6 +30,8 @@ __all__ = [
     "build_llm",
     "build_stt",
     "complete_failover",
+    "llm_text",
+    "stt_transcribe",
     "test_provider",
     "provider_has_limits",
     "Exporter",

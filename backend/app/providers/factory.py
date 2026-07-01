@@ -80,6 +80,36 @@ def complete_failover(
     raise ProviderError(f"Все модели недоступны — {detail}")
 
 
+def llm_text(configs: list[ProviderConfig], messages: list[dict], *, tier: str = "strong", **kwargs) -> str:
+    """Фейловер по ПРОВАЙДЕРАМ (по приоритету) и внутри — по моделям. tier: 'strong' | 'fast'."""
+    errors: list[str] = []
+    for cfg in configs:
+        try:
+            llm = build_llm(cfg)
+        except ProviderError as exc:
+            errors.append(f"{cfg.type}: {exc}")
+            continue
+        models = cfg.fast_models() if tier == "fast" else cfg.strong_models()
+        try:
+            return complete_failover(llm, messages, models, **kwargs)
+        except ProviderError as exc:
+            log.warning("LLM-провайдер «%s» не справился, следующий по приоритету: %s", cfg.type, exc)
+            errors.append(f"{cfg.type}: {exc}")
+    raise ProviderError("Все LLM-провайдеры недоступны — " + " | ".join(errors))
+
+
+def stt_transcribe(configs: list[ProviderConfig], audio_path: str, language: str | None = None):
+    """Транскрипция с фейловером по STT-провайдерам (по приоритету)."""
+    errors: list[str] = []
+    for cfg in configs:
+        try:
+            return build_stt(cfg).transcribe(audio_path, language=language)
+        except ProviderError as exc:
+            log.warning("STT-провайдер «%s» не справился, следующий по приоритету: %s", cfg.type, exc)
+            errors.append(f"{cfg.type}: {exc}")
+    raise ProviderError("Все STT-провайдеры недоступны — " + " | ".join(errors))
+
+
 def test_provider(kind: str, config: ProviderConfig) -> tuple[bool, str | None]:
     """Пробный запрос к провайдеру. → (ok, error_text)."""
     try:

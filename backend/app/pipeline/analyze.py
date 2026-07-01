@@ -11,10 +11,7 @@ from collections.abc import Callable, Iterable
 
 import numpy as np
 
-from ..providers import (
-    ProviderConfig, ProviderError, Transcript, TranscriptSegment,
-    build_llm, complete_failover,
-)
+from ..providers import ProviderConfig, ProviderError, Transcript, TranscriptSegment, llm_text
 from . import prompts, signals
 from .types import RATING_KEYS, Candidate
 
@@ -123,7 +120,7 @@ def analyze(
     transcript: Transcript,
     *,
     categories: list[dict],
-    llm_config: ProviderConfig,
+    llm_configs: list[ProviderConfig],
     target_duration: tuple[int, int],
     language: str,
     scene_cuts: list[float] | None = None,
@@ -132,10 +129,7 @@ def analyze(
     max_shortlist: int = 40,
     progress_cb: ProgressCb = None,
 ) -> list[Candidate]:
-    llm = build_llm(llm_config)
-    fast_models = llm_config.fast_models()    # балансир: дешёвые модели по приоритету
-    strong_models = llm_config.strong_models()  # сильные модели по приоритету
-    dur_min, dur_max = target_duration
+    dur_min, dur_max = target_duration  # фейловер по провайдерам (приоритет) + моделям — в llm_text
 
     def progress(p: float, msg: str) -> None:
         if progress_cb:
@@ -147,13 +141,13 @@ def analyze(
     for i, batch_text in enumerate(batches):
         progress(0.1 + 0.4 * i / max(len(batches), 1), f"анализ 1/2 ({i + 1}/{len(batches)})")
         try:
-            out = complete_failover(
-                llm,
+            out = llm_text(
+                llm_configs,
                 [
                     {"role": "system", "content": prompts.pass1_system(language)},
                     {"role": "user", "content": prompts.pass1_user(batch_text, categories, dur_min, dur_max)},
                 ],
-                fast_models,
+                tier="fast",
                 temperature=0.3,
                 max_tokens=1500,
                 response_format={"type": "json_object"},
@@ -175,13 +169,13 @@ def analyze(
     for gi, group in enumerate(groups):
         progress(0.5 + 0.4 * gi / max(len(groups), 1), f"анализ 2/2 ({gi + 1}/{len(groups)})")
         try:
-            out = complete_failover(
-                llm,
+            out = llm_text(
+                llm_configs,
                 [
                     {"role": "system", "content": prompts.pass2_system(language)},
                     {"role": "user", "content": prompts.pass2_user(_candidates_text(group, transcript), categories, dur_min, dur_max)},
                 ],
-                strong_models,
+                tier="strong",
                 temperature=0.2,
                 max_tokens=2000,
                 response_format={"type": "json_object"},

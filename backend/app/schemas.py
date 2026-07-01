@@ -240,6 +240,7 @@ class CategoryOut(CategoryIn):
 
 # ===== Настройки =====
 class ProviderIn(BaseModel):
+    id: str | None = None  # стабильный id провайдера в списке (для сохранения ключа при правке)
     type: str
     base_url: str | None = None
     api_key: str | None = None
@@ -266,6 +267,9 @@ class BackupIn(BaseModel):
 class SettingsUpdate(BaseModel):
     llm_provider: ProviderIn | None = None
     stt_provider: ProviderIn | None = None
+    # приоритетные СПИСКИ провайдеров (index 0 = высший приоритет; фейловер вниз по списку)
+    llm_providers: list[ProviderIn] | None = None
+    stt_providers: list[ProviderIn] | None = None
     panel_password: str | None = None
     default_language: str | None = None
     render: RenderIn | None = None
