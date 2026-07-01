@@ -39,7 +39,7 @@ export type JobStage = (typeof JOB_STAGES)[number]
 export const SHORT_STATUSES = ['draft', 'approved', 'rejected'] as const
 export type ShortStatus = (typeof SHORT_STATUSES)[number]
 
-export const PROVIDER_TYPES = ['groq', 'openrouter', 'ollama', 'openai'] as const
+export const PROVIDER_TYPES = ['groq', 'openrouter', 'ollama', 'openai', 'friend'] as const
 export type ProviderType = (typeof PROVIDER_TYPES)[number]
 
 export const REFRAME_MODES = ['smartcrop', 'blurpad'] as const
@@ -258,6 +258,12 @@ export interface ProviderConfig {
   // Балансир: упорядоченные списки моделей (failover на 402/403/429). Пусто → одиночные model/model_fast.
   models?: string[] | null
   models_fast?: string[] | null
+  /**
+   * Доп. HTTP-заголовки (напр. Cloudflare Access). Значения — секреты: в GET маскируются ("****xxxx").
+   * Сохранение как у api_key (по id): маска/пусто → прежнее значение. Отсутствие ключа = «не трогать»,
+   * `{}` = очистить.
+   */
+  extra_headers?: Record<string, string>
 }
 
 export interface RenderSettings {

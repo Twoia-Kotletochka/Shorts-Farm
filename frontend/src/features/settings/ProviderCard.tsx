@@ -9,15 +9,17 @@ import {
 } from 'lucide-react'
 import { Badge, Button, Field, Input, Select, toast } from '@/components/ui'
 import { ModelListEditor } from './ModelListEditor'
+import { ExtraHeadersEditor } from './ExtraHeadersEditor'
 import { useTestProvider } from '@/api/hooks'
 import { apiErrorMessage } from '@/api/http'
-import { PROVIDER_PRESETS, PROVIDER_TYPE_LABELS } from '@/lib/labels'
+import { FRIEND_STT_BASE_URL, PROVIDER_PRESETS, PROVIDER_TYPE_LABELS } from '@/lib/labels'
 import { PROVIDER_TYPES } from '@/types/api'
 import type { ProviderConfig, ProviderType } from '@/types/api'
 import { cn } from '@/lib/cn'
 
 const MASKED_RE = /\*{2,}/
-const PRESET_BUTTONS: ProviderType[] = ['groq', 'openrouter', 'ollama']
+const PRESET_BUTTONS: ProviderType[] = ['groq', 'openrouter', 'ollama', 'friend']
+const CF_HEADERS = ['CF-Access-Client-Id', 'CF-Access-Client-Secret'] as const
 
 export interface ProviderCardProps {
   kind: 'llm' | 'stt'
@@ -59,18 +61,28 @@ export function ProviderCard({
 
   function applyType(next: ProviderType) {
     const pr = PROVIDER_PRESETS[next]
+    // Friend: у STT свой корневой base_url; пресет заводит пустые строки CF-Access.
+    const base_url = next === 'friend' && !isLlm ? FRIEND_STT_BASE_URL : pr.base_url
+    const extra: Partial<ProviderConfig> = {}
+    if (next === 'friend') {
+      const cur = provider.extra_headers ?? {}
+      const seeded: Record<string, string> = { ...cur }
+      for (const h of CF_HEADERS) seeded[h] = cur[h] ?? ''
+      extra.extra_headers = seeded
+    }
     if (isLlm) {
       patch({
         type: next,
-        base_url: pr.base_url,
+        base_url,
         api_key: '', // новый тип — свой ключ
         models: pr.llm_models,
         models_fast: pr.llm_models_fast,
         model: pr.llm_models[0] ?? '',
         model_fast: pr.llm_models_fast[0] ?? null,
+        ...extra,
       })
     } else {
-      patch({ type: next, base_url: pr.base_url, api_key: '', model: pr.stt_models[0] ?? '' })
+      patch({ type: next, base_url, api_key: '', model: pr.stt_models[0] ?? '', ...extra })
     }
   }
 
@@ -234,6 +246,11 @@ export function ProviderCard({
             )}
           </Field>
         )}
+
+        <ExtraHeadersEditor
+          value={provider.extra_headers}
+          onChange={(h) => patch({ extra_headers: h })}
+        />
 
         {preset.note && <p className="text-xs text-content-faint">{preset.note}</p>}
         {sttUnsupported && (

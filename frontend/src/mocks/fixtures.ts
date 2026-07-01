@@ -270,6 +270,20 @@ export const settings: Settings = {
       models: ['meta-llama/llama-3.3-70b-instruct'],
       models_fast: ['meta-llama/llama-3.1-8b-instruct'],
     },
+    {
+      id: 'p-friend',
+      type: 'friend',
+      base_url: 'https://friend-api.alt.rent/v1',
+      api_key: 'friend_demo_key_7788',
+      model: 'qwen3:8b',
+      model_fast: 'qwen3:8b',
+      models: ['qwen3:8b'],
+      models_fast: ['qwen3:8b'],
+      extra_headers: {
+        'CF-Access-Client-Id': 'demo-client-id.access',
+        'CF-Access-Client-Secret': 'demo-secret-value-abcd',
+      },
+    },
   ],
   stt_providers: [
     {

@@ -67,4 +67,22 @@ describe('ProviderListSection', () => {
     await userEvent.click(screen.getAllByLabelText('Удалить провайдер')[1]!)
     expect(typeSelects()).toHaveLength(1)
   })
+
+  it('friend умеет STT — нет предупреждения о нераспознавании', () => {
+    const stt: ProviderConfig[] = [
+      {
+        id: 'f',
+        type: 'friend',
+        base_url: 'https://friend-api.alt.rent',
+        api_key: '****key0',
+        model: 'whisper-large-v3',
+      },
+    ]
+    renderWithClient(
+      <ProviderListSection kind="stt" title="STT" icon={BrainCircuit} initial={stt} />,
+    )
+    expect(screen.queryByText(/не поддерживает распознавание/)).not.toBeInTheDocument()
+    // Пресет «Alternix Friend» доступен и в STT-секции.
+    expect(screen.getByRole('button', { name: 'Alternix Friend' })).toBeInTheDocument()
+  })
 })

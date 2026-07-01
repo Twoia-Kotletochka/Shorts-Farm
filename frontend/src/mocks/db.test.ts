@@ -33,3 +33,63 @@ describe('mock db — жизненный цикл шортса', () => {
     expect(db.getShort(id)!.rev).toBeGreaterThan(before)
   })
 })
+
+describe('mock db — extra_headers провайдера (Cloudflare Access)', () => {
+  const FRIEND = 'p-friend'
+  // Заводим у friend-провайдера известные (немаскированные) заголовки — для детерминизма теста.
+  function seedFriend(headers: Record<string, string>) {
+    const list = db.getSettings().llm_providers.map((p) =>
+      p.id === FRIEND ? { ...p, extra_headers: headers } : p,
+    )
+    db.updateSettings({ llm_providers: list })
+  }
+  const friendNow = () => db.getSettings().llm_providers.find((p) => p.id === FRIEND)!
+
+  it('GET маскирует значения extra_headers (как api_key)', () => {
+    seedFriend({ 'CF-Access-Client-Id': 'raw-id-1234', 'CF-Access-Client-Secret': 'raw-sec-5678' })
+    const f = friendNow()
+    expect(f.extra_headers!['CF-Access-Client-Id']).toBe('****1234')
+    expect(f.extra_headers!['CF-Access-Client-Secret']).toBe('****5678')
+  })
+
+  it('PUT: маска сохраняет прежнее значение, новое — перезаписывает', () => {
+    seedFriend({ 'CF-Access-Client-Id': 'raw-id-1234', 'CF-Access-Client-Secret': 'raw-sec-5678' })
+    const masked = friendNow().extra_headers! // оба маскированы
+    const list = db.getSettings().llm_providers.map((p) =>
+      p.id === FRIEND
+        ? {
+            ...p,
+            extra_headers: {
+              'CF-Access-Client-Id': masked['CF-Access-Client-Id']!, // оставляем маску → прежнее
+              'CF-Access-Client-Secret': 'brand-new-9999', // новое значение
+            },
+          }
+        : p,
+    )
+    db.updateSettings({ llm_providers: list })
+    const f = friendNow()
+    expect(f.extra_headers!['CF-Access-Client-Id']).toBe('****1234') // сохранилось прежнее
+    expect(f.extra_headers!['CF-Access-Client-Secret']).toBe('****9999') // перезаписалось
+  })
+
+  it('PUT без ключа extra_headers = «не трогать»', () => {
+    seedFriend({ 'CF-Access-Client-Id': 'raw-id-1234' })
+    const list = db.getSettings().llm_providers.map((p) => {
+      if (p.id !== FRIEND) return p
+      const copy = { ...p }
+      delete copy.extra_headers
+      return copy
+    })
+    db.updateSettings({ llm_providers: list })
+    expect(friendNow().extra_headers!['CF-Access-Client-Id']).toBe('****1234')
+  })
+
+  it('PUT с extra_headers:{} очищает заголовки', () => {
+    seedFriend({ 'CF-Access-Client-Id': 'raw-id-1234' })
+    const list = db.getSettings().llm_providers.map((p) =>
+      p.id === FRIEND ? { ...p, extra_headers: {} } : p,
+    )
+    db.updateSettings({ llm_providers: list })
+    expect(friendNow().extra_headers).toBeUndefined()
+  })
+})

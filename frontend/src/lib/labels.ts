@@ -97,7 +97,11 @@ export const PROVIDER_TYPE_LABELS: Record<ProviderType, string> = {
   openrouter: 'OpenRouter',
   ollama: 'Ollama Cloud',
   openai: 'OpenAI',
+  friend: 'Alternix Friend',
 }
+
+/** Base URL Alternix Friend для STT-карточки — корень (у LLM это `.../v1`, см. PROVIDER_PRESETS.friend). */
+export const FRIEND_STT_BASE_URL = 'https://friend-api.alt.rent'
 
 export const REFRAME_LABELS: Record<ReframeMode, string> = {
   smartcrop: 'Умная обрезка (smart-crop)',
@@ -180,5 +184,16 @@ export const PROVIDER_PRESETS: Record<ProviderType, ProviderPreset> = {
     llm_models: ['gpt-4o'],
     llm_models_fast: ['gpt-4o-mini'],
     stt_models: ['whisper-1'],
+  },
+  friend: {
+    type: 'friend',
+    label: 'Alternix Friend',
+    // LLM — OpenAI-совместимый `/v1`; для STT карточка ставит корень (FRIEND_STT_BASE_URL).
+    base_url: 'https://friend-api.alt.rent/v1',
+    needs_key: true,
+    llm_models: ['qwen3:8b'],
+    llm_models_fast: ['qwen3:8b'],
+    stt_models: ['whisper-large-v3'],
+    note: 'Alternix Friend — OpenAI-совместимый LLM + свой STT-эндпоинт. Обычно нужны заголовки Cloudflare Access (см. ниже).',
   },
 }

@@ -394,14 +394,45 @@ export function getSettings(): Settings {
   const s = clone(settings)
   s.llm_provider.api_key = maskKey(settings.llm_provider.api_key)
   s.stt_provider.api_key = maskKey(settings.stt_provider.api_key)
-  s.llm_providers = settings.llm_providers.map((p) => ({ ...p, api_key: maskKey(p.api_key) }))
-  s.stt_providers = settings.stt_providers.map((p) => ({ ...p, api_key: maskKey(p.api_key) }))
+  s.llm_providers = settings.llm_providers.map(maskProvider)
+  s.stt_providers = settings.stt_providers.map(maskProvider)
   s.panel_password_set = !!settings.panel_password
   s.panel_password = undefined // сам пароль наружу не отдаём
   return s
 }
 function isMasked(v?: string | null) {
   return !v || v.includes('*')
+}
+/** Маска провайдера для GET: секретны и api_key, и значения extra_headers. */
+function maskProvider(p: ProviderConfig): ProviderConfig {
+  const out: ProviderConfig = { ...p, api_key: maskKey(p.api_key) }
+  const mh = maskHeaders(p.extra_headers)
+  if (mh) out.extra_headers = mh
+  else delete out.extra_headers
+  return out
+}
+function maskHeaders(h?: Record<string, string> | null): Record<string, string> | undefined {
+  if (!h || Object.keys(h).length === 0) return undefined
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(h)) out[k] = maskKey(v) ?? ''
+  return out
+}
+
+/**
+ * Слить входящие extra_headers с прежними по имени: маска/пусто → прежнее значение.
+ * `undefined` (ключ отсутствует в payload) → не трогать; `{}` → очистить.
+ */
+function mergeHeaders(
+  prev: Record<string, string> | undefined,
+  incoming: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (incoming === undefined) return prev
+  const prevMap = prev ?? {}
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(incoming)) {
+    out[k] = isMasked(v) ? (prevMap[k] ?? '') : v
+  }
+  return out
 }
 
 /** Слить входящий список провайдеров с существующим по id: маскированный/пустой ключ → сохранить прежний. */
@@ -414,7 +445,11 @@ function mergeProviderList(
     const id = p.id ?? 'mock-' + Math.random().toString(36).slice(2, 8)
     const prev = byId.get(id)
     const key = !p.api_key || isMasked(p.api_key) ? (prev?.api_key ?? '') : p.api_key
-    return { ...p, id, api_key: key }
+    const merged: ProviderConfig = { ...p, id, api_key: key }
+    const mh = mergeHeaders(prev?.extra_headers, p.extra_headers)
+    if (mh === undefined) delete merged.extra_headers
+    else merged.extra_headers = mh
+    return merged
   })
 }
 export function updateSettings(body: SettingsUpdate): Settings {
