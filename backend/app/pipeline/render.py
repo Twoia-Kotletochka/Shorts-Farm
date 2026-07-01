@@ -22,10 +22,10 @@ DRAFT_W, DRAFT_H = 540, 960
 
 @dataclass
 class RenderOptions:
-    reframe: str = "smartcrop"      # smartcrop | blurpad
+    reframe: str = "sidecrop"       # smartcrop (9:16 в лицо) | sidecrop (4:5 + блюр, шире кадр) | blurpad (весь кадр + блюр)
     mirror: bool = False
     enhance: bool = False
-    zoom: bool = False
+    zoom: bool = False              # Ken Burns: плавный наезд камеры (см. _kenburns)
     trim_silence: bool = True
     loudnorm: bool = True
     encoder: str = "auto"           # auto | libx264 | vaapi
@@ -33,6 +33,8 @@ class RenderOptions:
     target_w: int = 1080
     target_h: int = 1920
     subtitles: bool = True
+    blur_sigma: float = 28.0        # сила размытия фона для sidecrop/blurpad
+    kenburns_total: float = 0.10    # суммарный наезд за клип (доля), при zoom=True
 
 
 @lru_cache(maxsize=1)
@@ -97,10 +99,10 @@ def _ass_escape(path: str) -> str:
     return path.replace("\\", "\\\\").replace(":", "\\:")
 
 
-def _track_x_expr(track: list[tuple[float, float]], w: int, h: int) -> str:
+def _track_x_expr(track: list[tuple[float, float]], cropw: str) -> str:
     """ffmpeg-выражение x(t) для динамического кропа: кусочно-линейная интерполяция центра лица.
+    cropw — выражение ширины окна кропа (напр. 'ih*9/16' или 'min(iw,ih*4/5)').
     Внутри одинарных кавычек запятые литеральны (экранировать не нужно)."""
-    cropw = f"ih*{w}/{h}"
     cx = f"{track[-1][1]:.4f}"  # после последнего keyframe — держим последнее значение
     for i in range(len(track) - 1, 0, -1):
         t0, c0 = track[i - 1]
@@ -112,22 +114,65 @@ def _track_x_expr(track: list[tuple[float, float]], w: int, h: int) -> str:
     return f"clip(iw*({cx})-({cropw})/2,0,iw-({cropw}))"
 
 
+def _kenburns(w: int, h: int, dur: float, total: float) -> str:
+    """Плавный наезд (Ken Burns): линейный зум 1.0→1+total за весь клип, центрируем.
+    Применяется к уже отмасштабированному WxH-кадру; субтитры прожигаем ПОСЛЕ (не зумятся)."""
+    frames = max(1, int(round(max(dur, 0.1) * 30)))
+    inc = max(0.00003, total / frames)
+    zmax = 1.0 + total
+    return (
+        f"zoompan=z='min(max(pzoom,1.0)+{inc:.6f},{zmax:.3f})':d=1"
+        f":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=30"
+    )
+
+
+def _blurpad_chain(w: int, h: int, sigma: float) -> str:
+    """Весь кадр вписан по ширине + размытый фон-заливка сверху/снизу (ничего не обрезаем)."""
+    return (
+        f"[0:v]split=2[bg][fg];"
+        f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+        f"gblur=sigma={sigma:.1f},eq=brightness=-0.06[bgb];"
+        f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease[fgs];"
+        f"[bgb][fgs]overlay=x=(W-w)/2:y=(H-h)/2[v]"
+    )
+
+
+def _sidecrop_chain(w: int, h: int, sigma: float, crop_cx: float | None,
+                    crop_track: list[tuple[float, float]] | None) -> str:
+    """Умеренная обрезка боков до 4:5 (следим за лицом) + лёгкий размытый фон до 9:16.
+    Кадр заметно шире, чем полный 9:16-кроп, видео «более квадратное»."""
+    cropw = "min(iw,ih*4/5)"  # окно 4:5 по полной высоте
+    if crop_track and len(crop_track) >= 2:
+        xexpr = _track_x_expr(crop_track, cropw)
+        fg = f"[fg]setpts=PTS-STARTPTS,crop=w='{cropw}':h=ih:x='{xexpr}':y=0,scale={w}:-2[fgs]"
+    else:
+        cx = crop_cx if crop_cx is not None else 0.5
+        xstat = f"clip(iw*{cx:.4f}-({cropw})/2,0,iw-({cropw}))"
+        fg = f"[fg]crop=w='{cropw}':h=ih:x='{xstat}':y=0,scale={w}:-2[fgs]"
+    return (
+        f"[0:v]split=2[bg][fg];"
+        f"[bg]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+        f"gblur=sigma={sigma:.1f},eq=brightness=-0.06[bgb];"
+        f"{fg};"
+        f"[bgb][fgs]overlay=x=(W-w)/2:y=(H-h)/2[v]"
+    )
+
+
 def _build_filter_complex(
     opts: RenderOptions, w: int, h: int, crop_cx: float | None, ass_path: str | None,
     vaapi: bool, draft: bool, audio_index: int | None,
-    crop_track: list[tuple[float, float]] | None = None,
+    crop_track: list[tuple[float, float]] | None = None, dur: float = 0.0,
 ) -> tuple[str, str]:
     ai = audio_index if audio_index is not None else 0
     if opts.reframe == "blurpad":
-        chain = (
-            f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,boxblur=20:5,crop={w}:{h}[bg];"
-            f"[0:v]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
-        )
+        chain = _blurpad_chain(w, h, opts.blur_sigma)
+    elif opts.reframe == "sidecrop":
+        chain = _sidecrop_chain(w, h, opts.blur_sigma, crop_cx, crop_track)
     elif crop_track and len(crop_track) >= 2:
         # ДИНАМИЧЕСКИЙ smart-crop: «камера» следит за лицом. setpts → t клипа начинается с 0.
-        xexpr = _track_x_expr(crop_track, w, h)
-        chain = f"[0:v]setpts=PTS-STARTPTS,crop=w=ih*{w}/{h}:h=ih:x='{xexpr}':y=0,scale={w}:{h}[v]"
+        cropw = f"ih*{w}/{h}"
+        xexpr = _track_x_expr(crop_track, cropw)
+        chain = f"[0:v]setpts=PTS-STARTPTS,crop=w={cropw}:h=ih:x='{xexpr}':y=0,scale={w}:{h}[v]"
     else:
         cx = crop_cx if crop_cx is not None else 0.5
         cropw = f"ih*{w}/{h}"
@@ -137,8 +182,8 @@ def _build_filter_complex(
     post: list[str] = []
     if opts.mirror:
         post.append("hflip")
-    if opts.zoom and not draft:
-        post.append(f"scale=trunc({w}*1.08/2)*2:trunc({h}*1.08/2)*2,crop={w}:{h}")
+    if opts.zoom:  # Ken Burns виден и в черновике (WYSIWYG); дёшев на низком разрешении
+        post.append(_kenburns(w, h, dur, opts.kenburns_total))
     if opts.enhance and not draft:
         post.append("hqdn3d,unsharp=5:5:0.8,eq=contrast=1.05:saturation=1.08")
     if ass_path:
@@ -189,7 +234,7 @@ def render_clip(
     last_err: Exception | None = None
     for enc in _encoder_order(opts, draft):
         vaapi = enc == "vaapi"
-        fc, amap = _build_filter_complex(opts, w, h, crop_cx, ass_path, vaapi, draft, audio_index, crop_track)
+        fc, amap = _build_filter_complex(opts, w, h, crop_cx, ass_path, vaapi, draft, audio_index, crop_track, dur)
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
         if vaapi:
             cmd += ["-vaapi_device", VAAPI_DEVICE]

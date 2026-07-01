@@ -65,7 +65,7 @@ class JobCreate(BaseModel):
     subtitle_preset_id: int | None = None
     subtitle_language: str | None = None
     effects: Effects = Effects()
-    reframe: Literal["smartcrop", "blurpad"] = "smartcrop"
+    reframe: Literal["smartcrop", "sidecrop", "blurpad"] = "sidecrop"
     target_duration_sec: list[int] = [15, 45]  # [min, max] — длина клипа (single)
     # для format=compilation: длина каждого момента и общий бюджет монтажа
     compilation_segment_sec: list[int] | None = None  # деф. [6,12]
@@ -115,7 +115,7 @@ class JobBatchIn(BaseModel):
     subtitle_preset_id: int | None = None
     subtitle_language: str | None = None
     effects: Effects = Effects()
-    reframe: Literal["smartcrop", "blurpad"] = "smartcrop"
+    reframe: Literal["smartcrop", "sidecrop", "blurpad"] = "sidecrop"
     target_duration_sec: list[int] = [15, 45]
     compilation_segment_sec: list[int] | None = None
     compilation_total_sec: int | None = None
@@ -255,7 +255,7 @@ class ProviderIn(BaseModel):
 
 class RenderIn(BaseModel):
     preset: str | None = None
-    reframe: Literal["smartcrop", "blurpad"] | None = None
+    reframe: Literal["smartcrop", "sidecrop", "blurpad"] | None = None
     duration_range: list[int] | None = None
     trim_silence: bool | None = None
     encoder: str | None = None

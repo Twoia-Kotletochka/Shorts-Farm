@@ -26,25 +26,31 @@ def slice_cues(transcript: Transcript, start: float, end: float) -> list[dict]:
             continue
         s = max(seg.start, start) - start
         e = min(seg.end, end) - start
-        if e <= s:
-            continue
         words = [
             {"word": w.word, "start": max(w.start, start) - start, "end": min(w.end, end) - start}
             for w in seg.words
             if w.end >= start and w.start <= end
         ]
+        # хвост сегмента у Whisper часто тянется в тишину — обрезаем конец до последнего слова,
+        # иначе субтитр «висит» после того, как речь закончилась (см. правку по просьбе пользователя)
+        if words:
+            e = min(e, max(w["end"] for w in words))
+        if e <= s:
+            continue
         cues.append({"start": round(s, 3), "end": round(e, 3), "text": seg.text.strip(), "words": words})
     return cues
 
 
 def word_cues(
     transcript: Transcript, start: float, end: float,
-    *, max_words: int = 6, max_gap: float = 0.7, max_dur: float = 2.6,
+    *, max_words: int = 3, max_gap: float = 0.35, max_dur: float = 2.4,
+    lead_in: float = 0.12, min_on: float = 1.0,
 ) -> list[dict]:
-    """Короткие реплики по таймингу СЛОВ — субтитры точно совпадают с озвучкой.
+    """Короткие реплики по таймингу СЛОВ — субтитры точно совпадают с озвучкой (стиль shorts).
 
-    Группируем слова в фразы (до max_words / паузы max_gap / длины max_dur), каждая реплика
-    показывается ровно в [время первого слова, время последнего]. Сегменты без word-таймкодов —
+    Группируем слова в короткие фразы (по умолчанию 2–3 слова / паузы >0.35с / длина ≤2.4с),
+    каждая показывается в [первое слово − lead_in, последнее слово]. В паузах — пусто. Реплика
+    держится минимум min_on секунд, но НЕ наезжает на следующую. Сегменты без word-таймкодов —
     как есть (fallback). Времена перебазированы к началу клипа.
     """
     cues: list[dict] = []
@@ -64,16 +70,25 @@ def word_cues(
                 or (w.start - group[-1].end) > max_gap
                 or (w.end - group[0].start) > max_dur
             ):
-                cues.append(_cue_from_words(group, start, end))
+                cues.append(_cue_from_words(group, start, end, lead_in))
                 group = []
             group.append(w)
         if group:
-            cues.append(_cue_from_words(group, start, end))
-    return [c for c in cues if c]
+            cues.append(_cue_from_words(group, start, end, lead_in))
+
+    # держим реплику хотя бы min_on, но без наезда на следующую (иначе «висит» в тишине)
+    cues = [c for c in cues if c]
+    cues.sort(key=lambda c: c["start"])
+    for i, c in enumerate(cues):
+        want_end = max(c["end"], c["start"] + min_on)
+        if i + 1 < len(cues):
+            want_end = min(want_end, cues[i + 1]["start"] - 0.03)
+        c["end"] = round(max(want_end, c["start"] + 0.1), 3)
+    return cues
 
 
-def _cue_from_words(group: list, start: float, end: float) -> dict:
-    s = max(0.0, group[0].start - start)
+def _cue_from_words(group: list, start: float, end: float, lead_in: float = 0.0) -> dict:
+    s = max(0.0, group[0].start - start - lead_in)   # текст появляется на ~lead_in раньше слова
     e = min(end, group[-1].end) - start
     text = " ".join(w.word.strip() for w in group if w.word.strip())
     return {"start": round(s, 3), "end": round(max(e, s + 0.1), 3), "text": text, "words": []}

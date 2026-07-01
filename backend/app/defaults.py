@@ -41,10 +41,12 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "default_language": "ru",
     "render": {
         "preset": "medium",          # libx264 preset
-        "reframe": "smartcrop",      # smartcrop | blurpad
+        "reframe": "sidecrop",       # smartcrop (в лицо, 9:16) | sidecrop (4:5 + блюр, шире) | blurpad (весь кадр + блюр)
         "duration_range": [15, 45],  # сек
         "trim_silence": True,        # авто-обрезка тишины по краям
         "encoder": "auto",           # auto (VAAPI→libx264) | libx264
+        "blur_sigma": 28.0,          # размытие фона (sidecrop/blurpad)
+        "kenburns_total": 0.10,      # наезд камеры за клип при эффекте zoom
     },
     "retention_days": 14,
     "backup": {"enabled": False, "period": "daily"},

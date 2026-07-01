@@ -9,7 +9,8 @@ import logging
 
 log = logging.getLogger(__name__)
 
-MAX_STEP = 0.30  # макс. сдвиг центра между соседними keyframe (выше → камера резче следит)
+MAX_STEP = 0.60   # макс. сдвиг центра между соседними keyframe (выше → камера резче доводит до цели)
+DEADZONE = 0.10   # «мёртвая зона»: пока лицо в ±DEADZONE от текущего центра — камера покоится (нет дрейфа)
 
 
 def face_center_norm(video_path: str, start: float, end: float, samples: int = 8) -> float | None:
@@ -49,11 +50,13 @@ def face_center_norm(video_path: str, start: float, end: float, samples: int = 8
 
 
 def face_track(
-    video_path: str, start: float, end: float, *, step_sec: float = 1.0, max_kf: int = 40
+    video_path: str, start: float, end: float, *, step_sec: float = 0.6, max_kf: int = 60,
+    deadzone: float = DEADZONE, max_step: float = MAX_STEP,
 ) -> list[tuple[float, float]] | None:
     """Траектория центра лица: [(t_отн_клипа, cx_норм), ...] для динамического кропа.
 
-    Сэмплируем каждые ~step_sec, заполняем пропуски, сглаживаем и ограничиваем скорость пана.
+    Сэмплируем часто (~step_sec), заполняем пропуски. «Камера» покоится, пока лицо в мёртвой
+    зоне ±deadzone; вышло — быстро доводим до цели шагом ≤max_step (резко, без вялого дрейфа).
     None — если лиц нет вообще (тогда вызывающий код берёт статичный центр).
     """
     try:
@@ -103,16 +106,15 @@ def face_track(
                 last = xs[i]
         xs = [0.5 if v is None else v for v in xs]
 
-        # сглаживание (скользящее среднее окно 3)
-        sm = []
-        for i in range(len(xs)):
-            lo, hi = max(0, i - 1), min(len(xs), i + 2)
-            sm.append(sum(xs[lo:hi]) / (hi - lo))
-        # ограничение скорости пана (плавность)
-        out = [sm[0]]
-        for v in sm[1:]:
-            delta = max(-MAX_STEP, min(MAX_STEP, v - out[-1]))
-            out.append(out[-1] + delta)
+        # мёртвая зона + быстрый доводчик: камера стоит, пока лицо не вышло за ±deadzone,
+        # затем резко (шагом ≤max_step) доводит центр до цели. Так «оператор» не тормозит.
+        held = xs[0]
+        out = [held]
+        for raw in xs[1:]:
+            if abs(raw - held) > deadzone:
+                step = max(-max_step, min(max_step, raw - held))
+                held = held + step
+            out.append(held)
 
         return [(ts[i], round(out[i], 4)) for i in range(len(ts))]
     finally:

@@ -13,6 +13,37 @@ from .jsonutil import parse_json
 log = logging.getLogger(__name__)
 
 
+def _ask(llm_configs, hook_title, category, transcript_text, language, tier: str) -> dict:
+    out = llm_text(
+        llm_configs,
+        [
+            {"role": "system", "content": prompts.metadata_system(language)},
+            {"role": "user", "content": prompts.metadata_user(hook_title, category, transcript_text)},
+        ],
+        tier=tier,
+        temperature=0.6,
+        max_tokens=800,
+        response_format={"type": "json_object"},
+    )
+    data = parse_json(out)
+    if not isinstance(data, dict):  # parse_json может вернуть список/скаляр — приводим к {}
+        log.warning("Метаданные: неожиданный JSON (%s); первые 200 симв: %r", type(data).__name__, str(out)[:200])
+        data = {}
+    return data
+
+
+def _fallback(hook_title: str, category: str | None, transcript_text: str) -> dict:
+    """Локальные метаданные, когда LLM недоступен/пуст — поля НИКОГДА не остаются пустыми."""
+    desc = transcript_text.strip().replace("\n", " ")
+    if len(desc) > 160:
+        desc = desc[:157].rsplit(" ", 1)[0] + "…"
+    tags = ["#shorts", "#reels", "#fyp"]
+    if category:
+        tags.insert(0, "#" + str(category).replace(" ", ""))
+    return {"title": hook_title or (desc[:60] or "Клип"), "description": desc,
+            "hashtags": tags[:15], "first_comment": "", "variants": []}
+
+
 def generate_metadata(
     *,
     hook_title: str,
@@ -21,22 +52,18 @@ def generate_metadata(
     llm_configs: list[ProviderConfig],
     language: str,
 ) -> dict:
-    try:
-        out = llm_text(
-            llm_configs,
-            [
-                {"role": "system", "content": prompts.metadata_system(language)},
-                {"role": "user", "content": prompts.metadata_user(hook_title, category, transcript_text)},
-            ],
-            tier="strong",
-            temperature=0.6,
-            max_tokens=800,
-            response_format={"type": "json_object"},
-        )
-        data = parse_json(out)
-    except ProviderError as exc:
-        log.warning("Метаданные не сгенерированы: %s", exc)
-        data = {}
+    data: dict = {}
+    for tier in ("strong", "fast"):  # не вышло сильной — пробуем дешёвую, потом локальный фолбэк
+        try:
+            data = _ask(llm_configs, hook_title, category, transcript_text, language, tier)
+        except ProviderError as exc:
+            log.warning("Метаданные (%s) не сгенерированы: %s", tier, exc)
+            data = {}
+        if data.get("title") or data.get("description"):
+            break
+
+    if not (data.get("title") or data.get("description")):
+        return _fallback(hook_title, category, transcript_text)  # никогда не пусто
 
     hashtags = data.get("hashtags") or []
     if isinstance(hashtags, str):

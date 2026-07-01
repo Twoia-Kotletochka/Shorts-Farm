@@ -54,16 +54,36 @@ def _existing_intervals(s: Short) -> list[tuple[float, float]]:
     return [(s.start_ts, s.end_ts)]
 
 
+def _start_on_speech(word_starts: list[float], start: float, max_shift: float = 1.5) -> float:
+    """Сдвинуть начало клипа вперёд к первому слову (обрезать ведущую тишину до max_shift),
+    чтобы шортс открывался речью/крючком, а не мёртвым воздухом."""
+    cands = [w for w in word_starts if w >= start - 0.15]
+    if not cands:
+        return start
+    ws = min(cands)
+    return max(0.0, ws) if (ws - start) <= max_shift else start
+
+
+def _bucket(dur: float, dur_min: int, dur_max: int) -> int:
+    """Бакет длительности (0/1/2) для разнообразия отбора."""
+    if dur_max <= dur_min:
+        return 0
+    r = (dur - dur_min) / (dur_max - dur_min)
+    return 0 if r < 1 / 3 else (1 if r < 2 / 3 else 2)
+
+
 def _snap(
     c: Candidate,
     cuts: list[float],
     word_bounds: list[float],
+    word_starts: list[float],
     dur_min: int,
     dur_max: int,
     movie_duration: float | None,
 ) -> bool:
     start = signals.nearest_cut(cuts, c.start) if cuts else c.start
     start = _nearest(word_bounds, start, 0.6)
+    start = _start_on_speech(word_starts, max(0.0, start))
     start = max(0.0, start)
     end = c.end
     if end - start < dur_min:
@@ -95,8 +115,9 @@ def select_moments(
     dur_min, dur_max = target_duration
     cuts = scene_cuts or []
     word_bounds = _word_bounds(transcript)
+    word_starts = sorted({round(w.start, 3) for seg in transcript.segments for w in seg.words})
 
-    snapped = [c for c in candidates if _snap(c, cuts, word_bounds, dur_min, dur_max, movie.duration)]
+    snapped = [c for c in candidates if _snap(c, cuts, word_bounds, word_starts, dur_min, dur_max, movie.duration)]
 
     existing: list[tuple[float, float]] = []
     if not allow_duplicates:
@@ -105,27 +126,52 @@ def select_moments(
 
     chosen: list[Candidate] = []
     acc = 0.0  # суммарная длительность отобранного (для бюджета компиляции)
-    for c in sorted(snapped, key=lambda x: x.overall, reverse=True):
+
+    def _fits(c: Candidate) -> bool:
         if any(_overlaps(c.start, c.end, a, b) for a, b in existing):
-            continue  # уже нарезанный момент (дедуп между запусками)
+            return False  # уже нарезанный момент (дедуп между запусками)
         if any(_overlaps(c.start, c.end, ch.start, ch.end) for ch in chosen):
-            continue  # пересечение внутри текущего запуска
-        # Бюджет длительности (компиляция): не вылезаем за лимит. `continue`, а не
-        # `break`, — чтобы более короткий момент рейтингом ниже всё же влез в остаток.
-        # `chosen` в условии гарантирует хотя бы один сегмент, даже если он длиннее бюджета.
+            return False  # пересечение внутри текущего запуска
+        # Бюджет (компиляция): не вылезаем за лимит; хотя бы один сегмент гарантирован (`chosen`).
         if total_budget is not None and chosen and acc + c.duration > total_budget:
-            continue
+            return False
+        return True
+
+    def _take(c: Candidate) -> None:
+        nonlocal acc
         c.moment_id = f"{movie.id}-{int(round(c.start))}-{int(round(c.end))}"
         chosen.append(c)
         acc += c.duration
+
+    # Разнообразие длительностей: не даём набрать все клипы из одного бакета длины
+    # (иначе всё получается ~одинаковым, напр. по ~20с). Кап на бакет = ceil(count/3).
+    ranked = sorted(snapped, key=lambda x: x.overall, reverse=True)
+    per_bucket = max(1, -(-count // 3))
+    bucket_counts = {0: 0, 1: 0, 2: 0}
+    deferred: list[Candidate] = []
+    for c in ranked:
         if len(chosen) >= count:
             break
+        if not _fits(c):
+            continue
+        b = _bucket(c.duration, dur_min, dur_max)
+        if bucket_counts[b] >= per_bucket:
+            deferred.append(c)  # бакет полон — отложим на добор
+            continue
+        _take(c)
+        bucket_counts[b] += 1
         if total_budget is not None and acc >= total_budget:
             break
+    # добор отложенными, если из-за кап-ов не набрали count
+    for c in deferred:
+        if len(chosen) >= count or (total_budget is not None and acc >= total_budget):
+            break
+        if _fits(c):
+            _take(c)
 
     log.info(
-        "Отбор: из %d кандидатов выбрано %d (count=%d, бюджет=%s, итог≈%.1fс).",
+        "Отбор: из %d кандидатов выбрано %d (count=%d, бюджет=%s, бакеты=%s, итог≈%.1fс).",
         len(snapped), len(chosen), count,
-        f"{total_budget:.0f}с" if total_budget is not None else "—", acc,
+        f"{total_budget:.0f}с" if total_budget is not None else "—", bucket_counts, acc,
     )
     return chosen
