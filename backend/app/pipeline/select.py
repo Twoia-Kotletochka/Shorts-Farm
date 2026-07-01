@@ -72,26 +72,45 @@ def _bucket(dur: float, dur_min: int, dur_max: int) -> int:
     return 0 if r < 1 / 3 else (1 if r < 2 / 3 else 2)
 
 
+def _extend_end(seg_ends: list[float], start: float, dur_min: int, dur_max: int, target: float) -> float:
+    """Конец клипа — на завершённой реплике (границе сегмента) в окне [start+min, start+max],
+    ближайшей к целевой длине target. Так длина естественная и разная, а не «ровно min».
+    Слабые LLM часто дают вырожденно короткий end — здесь мы его переопределяем по транскрипту."""
+    lo, hi = start + dur_min, start + dur_max
+    within = [e for e in seg_ends if lo <= e <= hi]
+    if within:
+        tgt = start + target
+        return min(within, key=lambda e: abs(e - tgt))
+    after = [e for e in seg_ends if e >= lo]
+    return min(after[0], hi) if after else lo
+
+
 def _snap(
     c: Candidate,
     cuts: list[float],
     word_bounds: list[float],
     word_starts: list[float],
+    seg_ends: list[float],
     dur_min: int,
     dur_max: int,
+    target: float,
     movie_duration: float | None,
 ) -> bool:
     start = signals.nearest_cut(cuts, c.start) if cuts else c.start
     start = _nearest(word_bounds, start, 0.6)
     start = _start_on_speech(word_starts, max(0.0, start))
     start = max(0.0, start)
+
     end = c.end
-    if end - start < dur_min:
-        end = start + dur_min
-    if end - start > dur_max:
-        end = start + dur_max
+    # конец вне целевого диапазона (в т.ч. вырожденно короткий у слабых моделей) — переопределяем
+    # по завершённой реплике рядом с целевой длиной; так длины разные и не «залипают» на min
+    if not (start + dur_min <= end <= start + dur_max):
+        end = _extend_end(seg_ends, start, dur_min, dur_max, target)
     end = signals.nearest_cut(cuts, end) if cuts else end
     end = _nearest(word_bounds, end, 0.6)
+    # предохранители диапазона
+    end = max(end, start + dur_min)
+    end = min(end, start + dur_max)
     if movie_duration:
         end = min(end, movie_duration)
     if end - start < 1.0:
@@ -116,8 +135,15 @@ def select_moments(
     cuts = scene_cuts or []
     word_bounds = _word_bounds(transcript)
     word_starts = sorted({round(w.start, 3) for seg in transcript.segments for w in seg.words})
+    seg_ends = sorted(round(seg.end, 3) for seg in transcript.segments if seg.text)
 
-    snapped = [c for c in candidates if _snap(c, cuts, word_bounds, word_starts, dur_min, dur_max, movie.duration)]
+    # целевые длины ротируем по диапазону (min / середина / max) → разнообразие длительностей
+    _targets = [dur_min, (dur_min + dur_max) / 2.0, dur_max]
+    snapped = [
+        c for i, c in enumerate(candidates)
+        if _snap(c, cuts, word_bounds, word_starts, seg_ends,
+                 dur_min, dur_max, _targets[i % 3], movie.duration)
+    ]
 
     existing: list[tuple[float, float]] = []
     if not allow_duplicates:
