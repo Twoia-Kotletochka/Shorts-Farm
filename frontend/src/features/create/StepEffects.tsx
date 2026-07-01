@@ -1,4 +1,4 @@
-import { Crop, FlipHorizontal2, Image, Sparkles, ZoomIn } from 'lucide-react'
+import { Crop, FlipHorizontal2, Image, RectangleVertical, Sparkles, ZoomIn } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Field, Switch } from '@/components/ui'
 import { EFFECT_LABELS, REFRAME_LABELS } from '@/lib/labels'
@@ -15,16 +15,18 @@ interface StepEffectsProps {
 const EFFECT_META: { key: keyof JobEffects; icon: LucideIcon; desc: string }[] = [
   { key: 'mirror', icon: FlipHorizontal2, desc: 'Горизонтальное отражение — обход анти-копи фильтров.' },
   { key: 'enhance', icon: Sparkles, desc: 'Лёгкое улучшение резкости и цвета.' },
-  { key: 'zoom', icon: ZoomIn, desc: 'Медленный наезд камеры для динамики.' },
+  { key: 'zoom', icon: ZoomIn, desc: 'Плавный наезд камеры (Ken Burns) — динамика.' },
 ]
 
 const REFRAME_ICON: Record<ReframeMode, LucideIcon> = {
   smartcrop: Crop,
+  sidecrop: RectangleVertical,
   blurpad: Image,
 }
 const REFRAME_DESC: Record<ReframeMode, string> = {
-  smartcrop: 'Кадрирование 9:16 по центру действия — без полос.',
-  blurpad: 'Полный кадр по центру, сверху и снизу — размытый фон.',
+  smartcrop: 'Камера следит за лицом, полный 9:16 — самый крупный план.',
+  sidecrop: 'Обрезка боков до 4:5 + лёгкий размытый фон. Шире, видно больше сцены.',
+  blurpad: 'Весь кадр по ширине, размытый фон сверху/снизу — ничего не режем.',
 }
 
 export function StepEffects({ effects, reframe, onEffect, onReframe }: StepEffectsProps) {
@@ -59,7 +61,7 @@ export function StepEffects({ effects, reframe, onEffect, onReframe }: StepEffec
       </Field>
 
       <Field label="Переформатирование в вертикаль (9:16)">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {REFRAME_MODES.map((mode) => {
             const Icon = REFRAME_ICON[mode]
             const active = mode === reframe

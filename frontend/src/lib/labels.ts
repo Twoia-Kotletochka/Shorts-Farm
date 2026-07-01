@@ -104,8 +104,9 @@ export const PROVIDER_TYPE_LABELS: Record<ProviderType, string> = {
 export const FRIEND_STT_BASE_URL = 'https://friend-api.alt.rent'
 
 export const REFRAME_LABELS: Record<ReframeMode, string> = {
-  smartcrop: 'Умная обрезка (smart-crop)',
-  blurpad: 'Размытый фон',
+  smartcrop: 'Кроп в лицо (9:16)',
+  sidecrop: 'Квадратный кроп (4:5 + фон)',
+  blurpad: 'Весь кадр + размытый фон',
 }
 
 export const FORMAT_LABELS: Record<ShortFormat, string> = {
@@ -122,7 +123,7 @@ export const SUBTITLE_POSITION_LABELS: Record<SubtitlePosition, string> = {
 export const EFFECT_LABELS = {
   mirror: 'Зеркало',
   enhance: 'Улучшение',
-  zoom: 'Zoom',
+  zoom: 'Наезд (Ken Burns)',
 } as const
 
 export const RATING_CRITERIA: { key: 'retention' | 'emotion' | 'dynamics' | 'virality'; label: string }[] = [

@@ -10,7 +10,7 @@ export const DEFAULT_PARAMS: JobParams = {
   subtitle_preset_id: null,
   subtitle_language: 'ru',
   effects: { mirror: false, enhance: true, zoom: false },
-  reframe: 'smartcrop',
+  reframe: 'sidecrop',
   target_duration_sec: [15, 40],
   language: 'ru',
   allow_duplicates: false,

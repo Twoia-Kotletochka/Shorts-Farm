@@ -42,7 +42,7 @@ export type ShortStatus = (typeof SHORT_STATUSES)[number]
 export const PROVIDER_TYPES = ['groq', 'openrouter', 'ollama', 'openai', 'friend'] as const
 export type ProviderType = (typeof PROVIDER_TYPES)[number]
 
-export const REFRAME_MODES = ['smartcrop', 'blurpad'] as const
+export const REFRAME_MODES = ['smartcrop', 'sidecrop', 'blurpad'] as const
 export type ReframeMode = (typeof REFRAME_MODES)[number]
 
 export const SHORT_FORMATS = ['single', 'compilation'] as const
@@ -164,6 +164,8 @@ export interface ShortMetadata {
   variants?: string[]
   /** Причина падения финального рендера (если был). Показываем на approved-без-final. */
   render_error?: string | null
+  /** Какая аудиодорожка зафиксирована для синхры субтитров. Read-only, информационно. */
+  audio_index?: number | null
 }
 
 export interface SubtitleCue {

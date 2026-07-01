@@ -242,7 +242,7 @@ export const settings: Settings = {
   default_language: 'ru',
   render: {
     preset: 'medium',
-    reframe: 'smartcrop',
+    reframe: 'sidecrop',
     duration_range: [15, 45],
     trim_silence: true,
     encoder: 'auto',
