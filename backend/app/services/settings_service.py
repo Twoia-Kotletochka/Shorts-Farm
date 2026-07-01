@@ -52,7 +52,18 @@ def _raw_to_config(raw: dict) -> ProviderConfig:
         model_fast=raw.get("model_fast"),
         models=raw.get("models") or [],
         models_fast=raw.get("models_fast") or [],
+        extra_headers=_decrypt_headers(raw.get("extra_headers")),
     )
+
+
+def _decrypt_headers(stored: dict | None) -> dict[str, str]:
+    """Значения доп. заголовков хранятся зашифрованными (как api_key)."""
+    out: dict[str, str] = {}
+    for name, enc in (stored or {}).items():
+        val = _decrypt_safe(enc or "")
+        if name and val:
+            out[name] = val
+    return out
 
 
 def get_provider_configs(db: Session, kind: str) -> list[ProviderConfig]:
@@ -87,6 +98,11 @@ def _mask_provider(raw: dict | None) -> dict:
     raw = dict(raw or {})
     real = _decrypt_safe(raw.get("api_key") or "")
     raw["api_key"] = mask_secret(real) if real else ""
+    if raw.get("extra_headers"):
+        raw["extra_headers"] = {
+            name: (mask_secret(v) if v else "")
+            for name, v in _decrypt_headers(raw["extra_headers"]).items()
+        }
     return raw
 
 
@@ -139,11 +155,17 @@ def _update_provider_list(db: Session, list_key: str, providers: list[dict]) -> 
         p = dict(p)
         pid = p.get("id") or uuid.uuid4().hex
         p["id"] = pid
+        prev = by_id.get(pid, {})
         incoming = p.get("api_key")
         if not incoming or _looks_masked(incoming):
-            p["api_key"] = by_id.get(pid, {}).get("api_key", "")  # сохранить прежний ключ
+            p["api_key"] = prev.get("api_key", "")  # сохранить прежний ключ
         else:
             p["api_key"] = encrypt(incoming)
+        # доп. заголовки: ключ отсутствует в payload → не трогаем прежние; присутствует → мёржим
+        if "extra_headers" in p:
+            p["extra_headers"] = _merge_secret_headers(prev.get("extra_headers"), p["extra_headers"])
+        elif prev.get("extra_headers"):
+            p["extra_headers"] = prev["extra_headers"]
         out.append(p)
     _set_raw(db, list_key, out)
     # зеркалим первый в одиночный provider (совместимость health/usage/providers-test)
@@ -170,8 +192,8 @@ def _update_provider(db: Session, key: str, value: dict) -> None:
     existing = dict(_get_raw(db, key) or DEFAULT_SETTINGS.get(key, {}))
     merged = dict(existing)
     for field, val in value.items():
-        if field == "api_key":
-            continue
+        if field in ("api_key", "extra_headers"):
+            continue  # секреты — отдельной обработкой ниже
         merged[field] = val
 
     incoming = value.get("api_key")
@@ -179,7 +201,26 @@ def _update_provider(db: Session, key: str, value: dict) -> None:
         merged["api_key"] = existing.get("api_key", "")  # сохранить существующий
     else:
         merged["api_key"] = encrypt(incoming)
+
+    if "extra_headers" in value:
+        merged["extra_headers"] = _merge_secret_headers(existing.get("extra_headers"), value["extra_headers"])
     _set_raw(db, key, merged)
+
+
+def _merge_secret_headers(prev: dict | None, incoming: dict | None) -> dict[str, str]:
+    """Значения-секреты доп. заголовков: пусто/маска → сохранить прежнее (шифр.), иначе — зашифровать новое."""
+    prev = prev or {}
+    out: dict[str, str] = {}
+    for name, val in (incoming or {}).items():
+        if not name:
+            continue
+        if not val or _looks_masked(val):
+            keep = prev.get(name)
+            if keep:
+                out[name] = keep  # уже зашифровано
+        else:
+            out[name] = encrypt(val)
+    return out
 
 
 def _update_password(db: Session, value) -> None:

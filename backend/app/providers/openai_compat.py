@@ -34,8 +34,14 @@ BASE_DELAY = 1.5
 MAX_DELAY = 30.0
 
 
-def _auth_headers(api_key: str | None) -> dict[str, str]:
-    return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+def _auth_headers(api_key: str | None, extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Bearer + произвольные доп. заголовки (напр. Cloudflare Access CF-Access-Client-*)."""
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    if extra:
+        headers.update({k: v for k, v in extra.items() if k and v})
+    return headers
 
 
 def _retry_after(resp: httpx.Response) -> float | None:
@@ -98,12 +104,14 @@ def _safe_json(resp: httpx.Response) -> Any:
 class OpenAICompatLLM:
     """Чат-комплишены через {base_url}/chat/completions."""
 
-    def __init__(self, base_url: str | None, api_key: str | None, model: str):
+    def __init__(self, base_url: str | None, api_key: str | None, model: str,
+                 extra_headers: dict[str, str] | None = None):
         if not base_url:
             raise ProviderError("Не задан base_url LLM-провайдера.")
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.extra_headers = extra_headers or {}
 
     def complete(
         self,
@@ -129,7 +137,7 @@ class OpenAICompatLLM:
             resp = _with_retry(lambda: httpx.post(
                 f"{self.base_url}/chat/completions",
                 json=payload,
-                headers=_auth_headers(self.api_key),
+                headers=_auth_headers(self.api_key, self.extra_headers),
                 timeout=DEFAULT_TIMEOUT,
             ), max_attempts=max_attempts)
             resp.raise_for_status()
@@ -152,18 +160,20 @@ class OpenAICompatLLM:
             raise ProviderError(f"Ошибка LLM-запроса: {exc}") from exc
 
     def list_models(self) -> list[str]:
-        return _list_models(self.base_url, self.api_key)
+        return _list_models(self.base_url, self.api_key, self.extra_headers)
 
 
 class OpenAICompatSTT:
     """Транскрипция через {base_url}/audio/transcriptions (verbose_json + word-level)."""
 
-    def __init__(self, base_url: str | None, api_key: str | None, model: str):
+    def __init__(self, base_url: str | None, api_key: str | None, model: str,
+                 extra_headers: dict[str, str] | None = None):
         if not base_url:
             raise ProviderError("Не задан base_url STT-провайдера.")
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
+        self.extra_headers = extra_headers or {}
 
     def transcribe(self, audio_path: str, language: str | None = None) -> Transcript:
         data: dict = {
@@ -184,7 +194,7 @@ class OpenAICompatSTT:
                 f"{self.base_url}/audio/transcriptions",
                 data=data,
                 files={"file": (fname, content, "application/octet-stream")},
-                headers=_auth_headers(self.api_key),
+                headers=_auth_headers(self.api_key, self.extra_headers),
                 timeout=DEFAULT_TIMEOUT,
             ))
             resp.raise_for_status()
@@ -195,7 +205,53 @@ class OpenAICompatSTT:
             raise ProviderError(f"Ошибка STT-запроса: {exc}") from exc
 
     def list_models(self) -> list[str]:
-        return _list_models(self.base_url, self.api_key)
+        return _list_models(self.base_url, self.api_key, self.extra_headers)
+
+
+class FriendSTT:
+    """Alternix Friend STT: POST {root}/api/stt/transcribe (multipart file+language).
+
+    Отличия от OpenAI-совместимого: путь в корне (не в /v1), нет параметра model,
+    формат ответа заранее не известен — парсим сегменты/слова, если есть, иначе plain-text.
+    """
+
+    def __init__(self, base_url: str | None, api_key: str | None, model: str,
+                 extra_headers: dict[str, str] | None = None):
+        if not base_url:
+            raise ProviderError("Не задан base_url STT-провайдера.")
+        root = base_url.rstrip("/")
+        if root.endswith("/v1"):  # STT живёт в корне, а chat — в /v1
+            root = root[:-3].rstrip("/")
+        self.root = root
+        self.api_key = api_key
+        self.model = model or "friend"
+        self.extra_headers = extra_headers or {}
+
+    def transcribe(self, audio_path: str, language: str | None = None) -> Transcript:
+        data: dict = {}
+        if language:
+            data["language"] = language
+        try:
+            with open(audio_path, "rb") as fh:
+                content = fh.read()
+            fname = audio_path.rsplit("/", 1)[-1]
+            resp = _with_retry(lambda: httpx.post(
+                f"{self.root}/api/stt/transcribe",
+                data=data,
+                files={"file": (fname, content, "application/octet-stream")},
+                headers=_auth_headers(self.api_key, self.extra_headers),
+                timeout=DEFAULT_TIMEOUT,
+            ))
+            resp.raise_for_status()
+            return _parse_transcription(_safe_json(resp), provider="friend", model=self.model)
+        except httpx.HTTPStatusError as exc:
+            raise ProviderError(_http_error_text(exc)) from exc
+        except (httpx.HTTPError, KeyError, ValueError, OSError) as exc:
+            raise ProviderError(f"Ошибка STT-запроса: {exc}") from exc
+
+    def list_models(self) -> list[str]:
+        # health-проверка провайдера: список моделей в /v1 (нужен Bearer + CF-заголовки)
+        return _list_models(f"{self.root}/v1", self.api_key, self.extra_headers)
 
 
 def _join_words(words: list[Word]) -> str:
@@ -233,14 +289,22 @@ def _parse_transcription(payload: dict, *, provider: str, model: str) -> Transcr
             )
         )
 
+    # Провайдер вернул только plain-text (без таймкодов) — сохраняем текст, тайминги нулевые.
+    # (Субтитрам нужны word-тайминги: такой STT годится для анализа, но не для точной синхры.)
+    if not segments:
+        plain = (payload.get("text") or "").strip()
+        if plain:
+            segments.append(TranscriptSegment(start=0.0, end=0.0, text=plain, words=[]))
+
     return Transcript(segments=segments, language=language, provider=provider, model=model)
 
 
-def _list_models(base_url: str, api_key: str | None) -> list[str]:
+def _list_models(base_url: str, api_key: str | None,
+                 extra_headers: dict[str, str] | None = None) -> list[str]:
     try:
         resp = _with_retry(lambda: httpx.get(
             f"{base_url.rstrip('/')}/models",
-            headers=_auth_headers(api_key),
+            headers=_auth_headers(api_key, extra_headers),
             timeout=httpx.Timeout(15.0),
         ))
         resp.raise_for_status()

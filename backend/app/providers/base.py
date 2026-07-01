@@ -32,6 +32,9 @@ class ProviderConfig:
     # Списки для балансира (failover по моделям). Пусто → используется одиночный model/model_fast.
     models: list[str] = field(default_factory=list)
     models_fast: list[str] = field(default_factory=list)
+    # Доп. HTTP-заголовки на каждый запрос (напр. Cloudflare Access: CF-Access-Client-Id/Secret).
+    # Значения — секреты (шифруются в настройках, маскируются на выдаче).
+    extra_headers: dict[str, str] = field(default_factory=dict)
 
     def strong_models(self) -> list[str]:
         """Сильные модели по приоритету (для 2-го прохода/метаданных)."""

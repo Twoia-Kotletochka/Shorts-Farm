@@ -249,6 +249,8 @@ class ProviderIn(BaseModel):
     # Балансир: списки моделей по приоритету (failover). Пусто → одиночные model/model_fast.
     models: list[str] | None = None
     models_fast: list[str] | None = None
+    # Доп. HTTP-заголовки (напр. Cloudflare Access). Значения — секреты (маскируются на выдаче).
+    extra_headers: dict[str, str] | None = None
 
 
 class RenderIn(BaseModel):

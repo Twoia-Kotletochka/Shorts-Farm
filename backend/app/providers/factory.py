@@ -14,14 +14,16 @@ from .base import (
     ProviderQuotaError,
     TranscriptionProvider,
 )
-from .openai_compat import OpenAICompatLLM, OpenAICompatSTT
+from .openai_compat import FriendSTT, OpenAICompatLLM, OpenAICompatSTT
 
 log = logging.getLogger(__name__)
 
 # Типы, требующие api_key (у Ollama своего сервера ключ не нужен).
-REQUIRES_KEY = {"groq", "openai", "openrouter"}
+REQUIRES_KEY = {"groq", "openai", "openrouter", "friend"}
 # Провайдеры с трекаемыми квотами (где есть учёт расхода/ожидание сброса).
 QUOTA_PROVIDERS = {"groq"}
+# STT-типы со своим (не OpenAI-совместимым) эндпоинтом транскрипции.
+FRIEND_TYPES = {"friend", "alternix"}
 
 
 def provider_has_limits(provider_type: str) -> bool:
@@ -42,14 +44,17 @@ def _validate(config: ProviderConfig, kind: str) -> None:
 
 def build_llm(config: ProviderConfig) -> LLMProvider:
     _validate(config, "LLM")
-    # Все известные типы OpenAI-совместимы. Anthropic native — отдельный адаптер (на будущее).
-    return OpenAICompatLLM(config.base_url, config.api_key, config.model)
+    # Все известные типы OpenAI-совместимы (в т.ч. Friend — chat в /v1). Различие — доп. заголовки.
+    return OpenAICompatLLM(config.base_url, config.api_key, config.model, config.extra_headers)
 
 
 def build_stt(config: ProviderConfig) -> TranscriptionProvider:
     _validate(config, "STT")
+    # Friend/Alternix — свой эндпоинт /api/stt/transcribe (не OpenAI-совместимый).
+    if config.type in FRIEND_TYPES:
+        return FriendSTT(config.base_url, config.api_key, config.model, config.extra_headers)
     # Ollama/OpenRouter — это LLM, не STT; для транскрипции их не берём (валидируется на уровне UI/настроек).
-    return OpenAICompatSTT(config.base_url, config.api_key, config.model)
+    return OpenAICompatSTT(config.base_url, config.api_key, config.model, config.extra_headers)
 
 
 def complete_failover(
