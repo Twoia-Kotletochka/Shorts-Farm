@@ -79,6 +79,16 @@ def get_provider_configs(db: Session, kind: str) -> list[ProviderConfig]:
     return [_raw_to_config(p) for p in raw_list if p]
 
 
+def get_provider_config_by_id(db: Session, kind: str, pid: str | None) -> ProviderConfig | None:
+    """Провайдер из приоритетного списка по стабильному id (ключ/заголовки расшифрованы)."""
+    if not pid:
+        return None
+    for raw in _get_raw(db, f"{kind}_providers") or []:
+        if isinstance(raw, dict) and raw.get("id") == pid:
+            return _raw_to_config(raw)
+    return None
+
+
 def get_provider_config(db: Session, kind: str) -> ProviderConfig:
     """Основной (высший приоритет) провайдер — для health/usage/providers-test."""
     return get_provider_configs(db, kind)[0]
