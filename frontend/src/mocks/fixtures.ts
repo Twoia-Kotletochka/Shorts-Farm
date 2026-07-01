@@ -249,6 +249,37 @@ export const settings: Settings = {
   },
   retention_days: 14,
   backup: { enabled: false, period: 'daily' },
+  llm_providers: [
+    {
+      id: 'p-groq',
+      type: 'groq',
+      base_url: 'https://api.groq.com/openai/v1',
+      api_key: 'gsk_demo_1234567890abcdef',
+      model: 'llama-3.3-70b-versatile',
+      model_fast: 'llama-3.1-8b-instant',
+      models: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct'],
+      models_fast: ['llama-3.1-8b-instant'],
+    },
+    {
+      id: 'p-openrouter',
+      type: 'openrouter',
+      base_url: 'https://openrouter.ai/api/v1',
+      api_key: 'sk-or-demo-abcdef',
+      model: 'meta-llama/llama-3.3-70b-instruct',
+      model_fast: 'meta-llama/llama-3.1-8b-instruct',
+      models: ['meta-llama/llama-3.3-70b-instruct'],
+      models_fast: ['meta-llama/llama-3.1-8b-instruct'],
+    },
+  ],
+  stt_providers: [
+    {
+      id: 's-groq',
+      type: 'groq',
+      base_url: 'https://api.groq.com/openai/v1',
+      api_key: 'gsk_demo_1234567890abcdef',
+      model: 'whisper-large-v3-turbo',
+    },
+  ],
 }
 
 export const usage: Usage = {

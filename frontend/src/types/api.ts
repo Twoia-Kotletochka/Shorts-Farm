@@ -248,6 +248,8 @@ export type CategoryInput = Omit<Category, 'id'>
 
 // ─── Настройки / провайдеры ─────────────────────────────────────────────────
 export interface ProviderConfig {
+  /** Стабильный id провайдера в приоритетном списке — для сохранения ключа при правке. */
+  id?: string
   type: ProviderType
   base_url?: string | null
   api_key?: string | null // в ответах GET маскируется ("****abcd")
@@ -272,6 +274,10 @@ export interface BackupSettings {
 }
 
 export interface Settings {
+  // Приоритетные СПИСКИ провайдеров (index 0 = высший; фейловер вниз по списку).
+  llm_providers: ProviderConfig[]
+  stt_providers: ProviderConfig[]
+  // Legacy-одиночные (зеркало первого элемента списка) — бэкенд ещё отдаёт для совместимости.
   llm_provider: ProviderConfig
   stt_provider: ProviderConfig
   /** GET возвращает только факт наличия пароля (сам пароль не отдаётся). */

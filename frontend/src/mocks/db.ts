@@ -9,6 +9,7 @@ import type {
   Movie,
   Profile,
   ProfileInput,
+  ProviderConfig,
   Settings,
   SettingsUpdate,
   ShortDetail,
@@ -393,12 +394,28 @@ export function getSettings(): Settings {
   const s = clone(settings)
   s.llm_provider.api_key = maskKey(settings.llm_provider.api_key)
   s.stt_provider.api_key = maskKey(settings.stt_provider.api_key)
+  s.llm_providers = settings.llm_providers.map((p) => ({ ...p, api_key: maskKey(p.api_key) }))
+  s.stt_providers = settings.stt_providers.map((p) => ({ ...p, api_key: maskKey(p.api_key) }))
   s.panel_password_set = !!settings.panel_password
   s.panel_password = undefined // сам пароль наружу не отдаём
   return s
 }
 function isMasked(v?: string | null) {
   return !v || v.includes('*')
+}
+
+/** Слить входящий список провайдеров с существующим по id: маскированный/пустой ключ → сохранить прежний. */
+function mergeProviderList(
+  existing: ProviderConfig[],
+  incoming: ProviderConfig[],
+): ProviderConfig[] {
+  const byId = new Map(existing.filter((p) => p.id).map((p) => [p.id, p]))
+  return incoming.map((p) => {
+    const id = p.id ?? 'mock-' + Math.random().toString(36).slice(2, 8)
+    const prev = byId.get(id)
+    const key = !p.api_key || isMasked(p.api_key) ? (prev?.api_key ?? '') : p.api_key
+    return { ...p, id, api_key: key }
+  })
 }
 export function updateSettings(body: SettingsUpdate): Settings {
   if (body.llm_provider) {
@@ -410,6 +427,16 @@ export function updateSettings(body: SettingsUpdate): Settings {
     const incoming = body.stt_provider
     const key = isMasked(incoming.api_key) ? settings.stt_provider.api_key : incoming.api_key
     settings.stt_provider = { ...settings.stt_provider, ...incoming, api_key: key }
+  }
+  if (body.llm_providers) {
+    settings.llm_providers = mergeProviderList(settings.llm_providers, body.llm_providers)
+    const first = settings.llm_providers[0]
+    if (first) settings.llm_provider = { ...first }
+  }
+  if (body.stt_providers) {
+    settings.stt_providers = mergeProviderList(settings.stt_providers, body.stt_providers)
+    const first = settings.stt_providers[0]
+    if (first) settings.stt_provider = { ...first }
   }
   if (body.render) settings.render = { ...settings.render, ...body.render }
   if (body.backup) settings.backup = { ...settings.backup, ...body.backup }

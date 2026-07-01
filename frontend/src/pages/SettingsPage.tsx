@@ -25,7 +25,7 @@ import { QueryBoundary } from '@/components/common/QueryBoundary'
 import { useSettings, useUpdateSettings } from '@/api/hooks'
 import { apiErrorMessage } from '@/api/http'
 import type { Settings, SettingsUpdate } from '@/types/api'
-import { ProviderForm } from '@/features/settings/ProviderForm'
+import { ProviderListSection } from '@/features/settings/ProviderListSection'
 import { CategoriesEditor } from '@/features/settings/CategoriesEditor'
 import { RenderSettingsForm } from '@/features/settings/RenderSettingsForm'
 import { BackupConfigPanel } from '@/features/settings/BackupConfigPanel'
@@ -195,17 +195,17 @@ export function SettingsPage() {
 
             {section === 'providers' && (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <ProviderForm
+                <ProviderListSection
                   kind="llm"
-                  title="LLM-провайдер"
+                  title="LLM-провайдеры"
                   icon={BrainCircuit}
-                  initial={data.llm_provider}
+                  initial={data.llm_providers ?? []}
                 />
-                <ProviderForm
+                <ProviderListSection
                   kind="stt"
-                  title="STT-провайдер"
+                  title="STT-провайдеры"
                   icon={AudioLines}
-                  initial={data.stt_provider}
+                  initial={data.stt_providers ?? []}
                 />
               </div>
             )}
